@@ -13,6 +13,14 @@
 extern t_exec_stage g_stage[];
 extern const size_t g_stage_cnt;
 
+static bool is_builtin_only_job(t_exec_job *job)
+{
+    if (!job || vec_size(&job->processes) != 1)
+        return false;
+    t_exec_process *pr = (t_exec_process *)job->processes.val[0];
+    return (pr && pr->kind == EXEC_BUILTIN);
+}
+
 t_exec_res exec_pipeline_run(t_exec_state *st,
                              t_pipeline *pl,
                              bool background,
@@ -35,7 +43,6 @@ t_exec_res exec_pipeline_run(t_exec_state *st,
             return EXEC_ERR;
 
         pid_t pid = fork();
-
         if (pid < 0)
         {
             exec_job_destroy(job);
@@ -45,10 +52,8 @@ t_exec_res exec_pipeline_run(t_exec_state *st,
         if (pid == 0)
         {
             t_pipeline_res child = {0};
-
             if (exec_pipeline_run(st, pl, false, &child) == EXEC_ERR)
                 _exit(1);
-
             _exit(child.exec.exit_code);
         }
 
@@ -64,7 +69,6 @@ t_exec_res exec_pipeline_run(t_exec_state *st,
         st->job_ctrl.last_bg_pid = pid;
 
         printf_fd(STDOUT_FILENO, "[%d] %d\n", job->job_id, pid);
-
         res->exec.exit_code = 0;
         return EXEC_OK;
     }
@@ -74,7 +78,6 @@ t_exec_res exec_pipeline_run(t_exec_state *st,
         return EXEC_ERR;
 
     t_exec_ctx ctx;
-
     if (exec_ctx_init(&ctx, st, pl, &res->exec) < 0)
         return EXEC_ERR;
 
@@ -100,7 +103,21 @@ t_exec_res exec_pipeline_run(t_exec_state *st,
         }
     }
 
-    if (!ctx.job || vec_size(&ctx.job->processes) == 0 || ctx.job->pgid <= 0)
+    /* проверка: пустой список процессов */
+    if (!ctx.job || vec_size(&ctx.job->processes) == 0)
+    {
+        if (ctx.job)
+            exec_job_destroy(ctx.job);
+        ctx.job = NULL;
+        exec_ctx_free(&ctx);
+        errno = EINVAL;
+        return EXEC_ERR;
+    }
+
+    /* проверка: pgid <= 0 допустимо только для одиночного builtin */
+    bool builtin_only = is_builtin_only_job(ctx.job);
+
+    if (ctx.job->pgid <= 0 && !builtin_only)
     {
         exec_job_destroy(ctx.job);
         ctx.job = NULL;
@@ -122,6 +139,15 @@ t_exec_res exec_pipeline_run(t_exec_state *st,
 
     res->pgid = job->pgid;
     res->last_pid = ctx.last_pid;
+
+    /* builtin: выполнен в родителе, ждать нечего */
+    if (builtin_only)
+    {
+        res->exec.exit_code = job->exit_code;
+        job_ctrl_remove(&st->job_ctrl, job->job_id);
+        exec_ctx_free(&ctx);
+        return EXEC_OK;
+    }
 
     DBG_WAIT("foreground wait pgid=%d\n", job->pgid);
 

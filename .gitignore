@@ -2,3 +2,4 @@ build/
 *.tag.gz
 *.a
 *.o
+*.tar.gz

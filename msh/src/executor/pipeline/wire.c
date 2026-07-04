@@ -41,7 +41,8 @@ int exec_pl_wire(t_exec_ctx *ctx)
 
         if (i == 0)
         {
-            pr->stdin_fd = STDIN_FILENO;
+            /* первый процесс в пайплайне: stdin закрыт */
+            pr->stdin_fd = -1;
             pr->stdout_fd = pipes[0]->fd[1];
         }
         else if (i == cnt - 1)

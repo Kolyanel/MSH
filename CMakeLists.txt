@@ -12,7 +12,7 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-set(CMAKE_C_FLAGS_DEBUG "-g -O0 -Wall -Wextra -Werror")
+set(CMAKE_C_FLAGS_DEBUG "-g -O0 -Wall -Wextra -Werror -DDEBUG")
 set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
 
 # =========================
@@ -27,7 +27,7 @@ set(MIMALLOC_DIR /root/mimalloc)
 # =========================
 # OUTPUT
 # =========================
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY /root/Coding_C)   # ← исправлено
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY /root/Coding_C)
 
 # =========================
 # MYLIB
@@ -67,7 +67,7 @@ file(GLOB_RECURSE MSH_SOURCES CONFIGURE_DEPENDS
 add_executable(msh ${MSH_SOURCES})
 
 # =========================
-# INCLUDE DIRS (ПОЛНЫЙ СПИСОК)
+# INCLUDE DIRS
 # =========================
 target_include_directories(msh PRIVATE
     ${MSH_DIR}/include

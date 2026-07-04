@@ -9,7 +9,6 @@
 #include "io.h"
 #include "job_control.h"
 
-
 /* ============================================================
  * FIND JOB BY PID
  * ============================================================ */
@@ -31,7 +30,6 @@ static t_exec_job *find_job_by_pid(t_job_control *jc,
         {
             t_exec_process *pr =
                 (t_exec_process *)job->processes.val[j];
-
             if (pr && pr->pid == pid)
             {
                 DBG_WAIT("pid=%d matched job_id=%d\n", pid, job->job_id);
@@ -42,10 +40,8 @@ static t_exec_job *find_job_by_pid(t_job_control *jc,
             }
         }
     }
-
     return NULL;
 }
-
 
 /* ============================================================
  * UPDATE PROCESS STATUS
@@ -89,7 +85,6 @@ int update_process_status(t_exec_process *pr, int status)
     return 0;
 }
 
-
 /* ============================================================
  * UPDATE JOB STATE
  * ============================================================ */
@@ -103,7 +98,6 @@ int update_job_state(t_exec_job *job)
     bool all_done = true;
     bool all_stopped = true;
     bool has_proc = false;
-
     t_exec_process *last = NULL;
 
     if (job->processes.argc > 0)
@@ -113,7 +107,6 @@ int update_job_state(t_exec_job *job)
     {
         t_exec_process *pr =
             (t_exec_process *)job->processes.val[i];
-
         if (!pr)
             continue;
 
@@ -148,10 +141,8 @@ int update_job_state(t_exec_job *job)
 
     DBG_WAIT("job_id=%d state updated=%d exit=%d\n",
              job->job_id, job->state, job->exit_code);
-
     return 0;
 }
-
 
 /* ============================================================
  * WAIT SINGLE PROCESS
@@ -179,16 +170,14 @@ int wait_process(t_exec_process *pr, int opt)
 
         if (ret == 0)
             return 0;
-
         break;
     }
 
     return update_process_status(pr, status);
 }
 
-
 /* ============================================================
- * WAIT JOB
+ * WAIT JOB — ждём по группе процессов (pgid)
  * ============================================================ */
 int wait_job(t_exec_job *job, int opt)
 {
@@ -204,37 +193,55 @@ int wait_job(t_exec_job *job, int opt)
     }
 
     int last_status = 0;
+    size_t remaining = job->processes.argc;
+    bool last_proc_done = false;
 
-    for (size_t i = 0; i < job->processes.argc; ++i)
+    while (remaining > 0)
     {
-        t_exec_process *pr =
-            (t_exec_process *)job->processes.val[i];
-
-        if (!pr || pr->pid <= 0)
-            continue;
-
         int status;
-        pid_t ret;
+        pid_t pid = waitpid(-job->pgid, &status, opt);
 
-        while (1)
+        if (pid < 0)
         {
-            ret = waitpid(pr->pid, &status, opt);
+            if (errno == EINTR)
+                continue;
+            if (errno == ECHILD)
+                break;
+            return -1;
+        }
 
-            if (ret < 0 && errno == EINTR)
+        for (size_t i = 0; i < job->processes.argc; ++i)
+        {
+            t_exec_process *pr =
+                (t_exec_process *)job->processes.val[i];
+            if (!pr || pr->pid != pid)
                 continue;
 
+            if (!pr->completed)
+            {
+                update_process_status(pr, status);
+                remaining--;
+                last_status = status;
+            }
             break;
         }
 
-        update_process_status(pr, status);
-        last_status = status;
+        /* если последний процесс завершился, убить остальные */
+        if (remaining > 0)
+        {
+            t_exec_process *last =
+                (t_exec_process *)job->processes.val[job->processes.argc - 1];
+            if (last && last->completed && !last_proc_done)
+            {
+                last_proc_done = true;
+                kill(-job->pgid, SIGPIPE);
+            }
+        }
     }
 
     update_job_state(job);
-
     return last_status;
 }
-
 
 /* ============================================================
  * FOREGROUND WAIT
@@ -270,10 +277,8 @@ int wait_foreground(t_job_control *jc, t_exec_job *job)
 
     DBG_WAIT("FG done job_id=%d status=%d\n",
              job->job_id, status);
-
     return status;
 }
-
 
 /* ============================================================
  * REAP CHILDREN

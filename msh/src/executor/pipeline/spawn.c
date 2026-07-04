@@ -11,6 +11,7 @@
 #include "io.h"
 
 static void spawn_cleanup(t_exec_process **p, size_t spawned, pid_t pgid);
+static void parent_close_pipes(t_exec_ctx *ctx);
 
 int exec_pl_spawn(t_exec_ctx *ctx)
 {
@@ -41,7 +42,6 @@ int exec_pl_spawn(t_exec_ctx *ctx)
         if (!pr || !pr->argv || !pr->argv[0])
             goto fail;
 
-        /* ✅ BUILTIN FIX: run in parent, no fork */
         if (pr->kind == EXEC_BUILTIN && pr->builtin)
         {
             size_t argc = 0;
@@ -66,14 +66,19 @@ int exec_pl_spawn(t_exec_ctx *ctx)
 
             setpgid(0, pgid);
 
-            DBG_SPAWN("child pid=%d pgid=%d cmd=%s\n",
-                      getpid(), pgid, pr->argv[0]);
+            fprintf(stderr, "[SPAWN] child pid=%d pgid=%d cmd=%s\n",
+                    getpid(), pgid, pr->argv[0]);
+            fflush(stderr);
 
             exec_pl_apply_process(ctx, i);
             _exit(127);
         }
 
         pr->pid = pid;
+
+        fprintf(stderr, "[SPAWN] parent: child %zu pid=%d cmd=%s\n",
+                i, pid, pr->argv[0]);
+        fflush(stderr);
 
         if (pgid == 0)
         {
@@ -87,15 +92,55 @@ int exec_pl_spawn(t_exec_ctx *ctx)
         spawned++;
     }
 
+    /* РОДИТЕЛЬ ЗАКРЫВАЕТ СВОИ КОПИИ ПАЙПОВ */
+    parent_close_pipes(ctx);
+
     job->started = true;
 
-    DBG_SPAWN("spawn done pgid=%d cnt=%zu\n", pgid, cnt);
+    fprintf(stderr, "[SPAWN] spawn done pgid=%d cnt=%zu\n", pgid, cnt);
+    fflush(stderr);
 
     return 0;
 
 fail:
+    parent_close_pipes(ctx);
     spawn_cleanup(p, spawned, pgid);
     return -1;
+}
+
+static void parent_close_pipes(t_exec_ctx *ctx)
+{
+    if (!ctx || !ctx->pipes.val)
+    {
+        fprintf(stderr, "[PIPE] parent_close_pipes: no pipes\n");
+        fflush(stderr);
+        return;
+    }
+
+    t_exec_pipe **pipes = (t_exec_pipe**)ctx->pipes.val;
+    size_t cnt = vec_size(&ctx->pipes);
+
+    fprintf(stderr, "[PIPE] parent closing %zu pipes\n", cnt);
+    fflush(stderr);
+
+    for (size_t i = 0; i < cnt; ++i)
+    {
+        if (!pipes[i])
+            continue;
+        fprintf(stderr, "[PIPE] pipe[%zu] fd[0]=%d fd[1]=%d\n",
+                i, pipes[i]->fd[0], pipes[i]->fd[1]);
+        fflush(stderr);
+        if (pipes[i]->fd[0] >= 0)
+        {
+            close(pipes[i]->fd[0]);
+            pipes[i]->fd[0] = -1;
+        }
+        if (pipes[i]->fd[1] >= 0)
+        {
+            close(pipes[i]->fd[1]);
+            pipes[i]->fd[1] = -1;
+        }
+    }
 }
 
 static void spawn_cleanup(t_exec_process **p, size_t spawned, pid_t pgid)
