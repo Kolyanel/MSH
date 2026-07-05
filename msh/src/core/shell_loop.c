@@ -44,6 +44,7 @@ int shell_loop(t_shell *sh)
         {
             sh->exec_state->signals.sigint_received = 0;
             errno = 0;
+            puts_fd(sh->tty_fd, "\n", 1);
         }
 
         if (sh->exec_state->signals.sigquit_received)
@@ -53,7 +54,7 @@ int shell_loop(t_shell *sh)
         }
 
         /* ============================================================
-         * PROMPT (NO newline)
+         * PROMPT
          * ============================================================ */
         char *prompt = sh_build_prompt(sh);
         if (!prompt)
@@ -74,10 +75,6 @@ int shell_loop(t_shell *sh)
 
         free(prompt);
 
-        /* IMPORTANT:
-         * ensure prompt is flushed before input
-         * prevents mixing prompt/debug/input
-         */
         fflush(NULL);
 
         /* ============================================================

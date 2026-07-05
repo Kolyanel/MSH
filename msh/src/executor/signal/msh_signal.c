@@ -79,11 +79,7 @@ int sig_set(t_sig_state *sig)
     if (set_handler(SIGCONT, sig_handle_cont, SA_RESTART, &sig->old_cont) < 0)
         return -1;
 
-    /* ============================================================
-     * КРИТИЧЕСКИ ВАЖНО: НЕ ИГНОРИРУЕМ SIGPIPE!
-     * Устанавливаем обработчик по умолчанию для дочерних процессов
-     * Иначе yes | head -n 3 будет висеть
-     * ============================================================ */
+    /* Устанавливаем SIGPIPE в SIG_DFL для дочерних процессов */
     signal(SIGPIPE, SIG_DFL);
 
     struct sigaction ign = {0};
@@ -135,8 +131,14 @@ void sig_handle_int(int signo)
 {
     (void)signo;
 
-    if (g_state)
-        g_state->signals.sigint_received = 1;
+    if (!g_state)
+        return;
+
+    g_state->signals.sigint_received = 1;
+
+    /* отправить SIGINT foreground-группе процессов */
+    if (g_state->job_ctrl.fg_job && g_state->job_ctrl.fg_job->pgid > 0)
+        kill(-g_state->job_ctrl.fg_job->pgid, SIGINT);
 }
 
 
