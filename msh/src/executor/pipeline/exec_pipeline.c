@@ -9,6 +9,7 @@
 #include "job_control.h"
 #include "exec_wait.h"
 #include "io.h"
+#include "msh_debug.h"
 
 extern t_exec_stage g_stage[];
 extern const size_t g_stage_cnt;

@@ -6,7 +6,7 @@
 #include <assert.h>
 
 #include "exec_wait.h"
-#include "io.h"
+#include "msh_debug.h"
 #include "job_control.h"
 
 /* ============================================================

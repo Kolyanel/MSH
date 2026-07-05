@@ -7,7 +7,7 @@
 #include "vector.h"
 #include "expand.h"
 #include "exec_cmd.h"
-#include "io.h"
+#include "msh_debug.h"
 
 static void cleanup_partial(t_exec_ctx *ctx, size_t upto)
 {

@@ -8,7 +8,8 @@
 #include "exec_pipe.h"
 #include "job_control.h"
 #include "exec_wait.h"
-#include "io.h"
+#include "exec_builtin.h"
+#include "msh_debug.h"
 
 static void spawn_cleanup(t_exec_process **p, size_t spawned, pid_t pgid);
 static void parent_close_pipes(t_exec_ctx *ctx);
@@ -47,10 +48,43 @@ int exec_pl_spawn(t_exec_ctx *ctx)
             size_t argc = 0;
             while (pr->argv[argc]) argc++;
 
-            int st = builtin_exec(pr->builtin, ctx, pr->argv, argc);
+            /* если есть редиректы — форкаемся */
+            if (vec_size(&pr->redirs) > 0)
+            {
+                pid_t pid = fork();
+                if (pid < 0)
+                    goto fail;
 
-            ctx->last_pid = -1;
-            job->exit_code = builtin_normalize_status(st);
+                if (pid == 0)
+                {
+                    if (pgid == 0)
+                        pgid = getpid();
+                    setpgid(0, pgid);
+
+                    exec_redir_apply(pr);
+                    close_pipes(ctx);
+
+                    int st = builtin_exec(pr->builtin, ctx, pr->argv, argc);
+                    _exit(builtin_normalize_status(st));
+                }
+
+                pr->pid = pid;
+                if (pgid == 0)
+                {
+                    pgid = pid;
+                    job->pgid = pid;
+                }
+                setpgid(pid, pgid);
+                ctx->last_pid = pid;
+                spawned++;
+            }
+            else
+            {
+                /* без редиректов — в родителе */
+                int st = builtin_exec(pr->builtin, ctx, pr->argv, argc);
+                ctx->last_pid = -1;
+                job->exit_code = builtin_normalize_status(st);
+            }
 
             continue;
         }
@@ -66,19 +100,14 @@ int exec_pl_spawn(t_exec_ctx *ctx)
 
             setpgid(0, pgid);
 
-            fprintf(stderr, "[SPAWN] child pid=%d pgid=%d cmd=%s\n",
-                    getpid(), pgid, pr->argv[0]);
-            fflush(stderr);
+            DBG_SPAWN("child pid=%d pgid=%d cmd=%s\n",
+                      getpid(), pgid, pr->argv[0]);
 
             exec_pl_apply_process(ctx, i);
             _exit(127);
         }
 
         pr->pid = pid;
-
-        fprintf(stderr, "[SPAWN] parent: child %zu pid=%d cmd=%s\n",
-                i, pid, pr->argv[0]);
-        fflush(stderr);
 
         if (pgid == 0)
         {
@@ -92,13 +121,11 @@ int exec_pl_spawn(t_exec_ctx *ctx)
         spawned++;
     }
 
-    /* РОДИТЕЛЬ ЗАКРЫВАЕТ СВОИ КОПИИ ПАЙПОВ */
     parent_close_pipes(ctx);
 
     job->started = true;
 
-    fprintf(stderr, "[SPAWN] spawn done pgid=%d cnt=%zu\n", pgid, cnt);
-    fflush(stderr);
+    DBG_SPAWN("spawn done pgid=%d cnt=%zu\n", pgid, cnt);
 
     return 0;
 
@@ -111,25 +138,15 @@ fail:
 static void parent_close_pipes(t_exec_ctx *ctx)
 {
     if (!ctx || !ctx->pipes.val)
-    {
-        fprintf(stderr, "[PIPE] parent_close_pipes: no pipes\n");
-        fflush(stderr);
         return;
-    }
 
     t_exec_pipe **pipes = (t_exec_pipe**)ctx->pipes.val;
     size_t cnt = vec_size(&ctx->pipes);
-
-    fprintf(stderr, "[PIPE] parent closing %zu pipes\n", cnt);
-    fflush(stderr);
 
     for (size_t i = 0; i < cnt; ++i)
     {
         if (!pipes[i])
             continue;
-        fprintf(stderr, "[PIPE] pipe[%zu] fd[0]=%d fd[1]=%d\n",
-                i, pipes[i]->fd[0], pipes[i]->fd[1]);
-        fflush(stderr);
         if (pipes[i]->fd[0] >= 0)
         {
             close(pipes[i]->fd[0]);

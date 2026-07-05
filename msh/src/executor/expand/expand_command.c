@@ -4,7 +4,7 @@
 
 #include "expand.h"
 #include "redir.h"
-#include "io.h"
+#include "msh_debug.h"
 
 
 t_exec_cmd *expand_command(t_exec_state *st, t_cmd *src)
@@ -14,7 +14,7 @@ t_exec_cmd *expand_command(t_exec_state *st, t_cmd *src)
         return NULL;
     }
 
-    printf_fd(STDERR_FILENO, "DEBUG: expand_command: src->redirs.argc=%zu\n", src->redirs.argc);
+    DBG_EXPAND("src->redirs.argc=%zu\n", src->redirs.argc);
 
     t_exec_cmd *dst = exec_cmd_create();
 
@@ -47,15 +47,15 @@ t_exec_cmd *expand_command(t_exec_state *st, t_cmd *src)
     size_t rcnt = vec_size(&src->redirs);
     t_redir **reds = (t_redir**)src->redirs.val;
 
-    printf_fd(STDERR_FILENO, "DEBUG: expand_command: rcnt=%zu\n", rcnt);
+    DBG_EXPAND("rcnt=%zu\n", rcnt);
 
     for (size_t i = 0; i < rcnt; ++i) {
-        printf_fd(STDERR_FILENO, "DEBUG: expand_command: expanding redir %zu\n", i);
+        DBG_EXPAND("expanding redir %zu\n", i);
 
         t_exec_redir *er = redir_expand(st, reds[i]);
 
         if (!er) {
-            printf_fd(STDERR_FILENO, "DEBUG: expand_command: redir_expand failed\n");
+            DBG_EXPAND("redir_expand failed\n");
             exec_cmd_free(dst);
             return NULL;
         }
@@ -67,7 +67,7 @@ t_exec_cmd *expand_command(t_exec_state *st, t_cmd *src)
         }
     }
 
-    printf_fd(STDERR_FILENO, "DEBUG: expand_command: dst->redirs.argc=%zu\n", dst->redirs.argc);
+    DBG_EXPAND("dst->redirs.argc=%zu\n", dst->redirs.argc);
 
     return dst;
 }

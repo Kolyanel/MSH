@@ -4,7 +4,7 @@
 
 #include "exec_pipeline_internal.h"
 #include "exec_pipe.h"
-#include "io.h"
+#include "msh_debug.h"
 
 int exec_pl_prepare(t_exec_ctx *ctx)
 {

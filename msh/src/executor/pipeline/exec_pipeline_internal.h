@@ -20,10 +20,10 @@ int exec_path_find(t_exec_ctx *ctx, t_exec_process *pr);
 /* -- pipe cleanup -- */
 void close_pipes(t_exec_ctx *ctx);
 
-
+/* -- redir -- */
 int exec_redir_apply(t_exec_process *pr);
 
-/* builtin execution */
+/* -- builtin execution -- */
 int builtin_exec(const t_builtin *bi,
                  t_exec_ctx *ctx,
                  char **argv,

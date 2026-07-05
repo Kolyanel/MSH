@@ -5,7 +5,7 @@
 
 #include "exec_pipeline_internal.h"
 #include "exec_builtin.h"
-#include "io.h"
+#include "msh_debug.h"
 
 int exec_path_resolve(t_exec_ctx *ctx, t_exec_process *pr);
 int exec_path_find(t_exec_ctx *ctx, t_exec_process *pr);

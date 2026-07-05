@@ -6,9 +6,9 @@
 
 #include "exec_pipeline_internal.h"
 #include "exec_pipe.h"
-#include "io.h"
+#include "msh_debug.h"
 
-static void close_all_pipes(t_exec_ctx *ctx)
+void close_pipes(t_exec_ctx *ctx)
 {
     if (!ctx || !ctx->pipes.val)
         return;
@@ -49,7 +49,6 @@ int exec_pl_apply_process(t_exec_ctx *ctx, size_t i)
     /* stdin */
     if (pr->stdin_fd == -1)
     {
-        /* закрыть stdin: перенаправить из /dev/null */
         int devnull = open("/dev/null", O_RDONLY);
         if (devnull >= 0)
         {
@@ -76,7 +75,7 @@ int exec_pl_apply_process(t_exec_ctx *ctx, size_t i)
 
     exec_redir_apply(pr);
 
-    close_all_pipes(ctx);
+    close_pipes(ctx);
 
     signal(SIGPIPE, SIG_DFL);
 
