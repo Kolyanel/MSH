@@ -3,6 +3,7 @@
 #include <signal.h>
 #include <errno.h>
 #include <assert.h>
+#include <fcntl.h>
 
 #include "exec_pipeline_internal.h"
 #include "exec_pipe.h"
@@ -48,8 +49,12 @@ int exec_pl_spawn(t_exec_ctx *ctx)
             size_t argc = 0;
             while (pr->argv[argc]) argc++;
 
-            /* если есть редиректы — форкаемся */
-            if (vec_size(&pr->redirs) > 0)
+            /* форкаемся если есть редиректы ИЛИ пайпы */
+            bool need_fork = (vec_size(&pr->redirs) > 0)
+                || (pr->stdin_fd != STDIN_FILENO)
+                || (pr->stdout_fd != STDOUT_FILENO);
+
+            if (need_fork)
             {
                 pid_t pid = fork();
                 if (pid < 0)
@@ -60,6 +65,38 @@ int exec_pl_spawn(t_exec_ctx *ctx)
                     if (pgid == 0)
                         pgid = getpid();
                     setpgid(0, pgid);
+
+                    /* применить stdin */
+                    if (pr->stdin_fd == -1)
+                    {
+                        int devnull = open("/dev/null", O_RDONLY);
+                        if (devnull >= 0)
+                        {
+                            dup2(devnull, STDIN_FILENO);
+                            close(devnull);
+                        }
+                        else
+                            close(STDIN_FILENO);
+                    }
+                    else if (pr->stdin_fd != STDIN_FILENO)
+                    {
+                        dup2(pr->stdin_fd, STDIN_FILENO);
+                        close(pr->stdin_fd);
+                    }
+
+                    /* применить stdout */
+                    if (pr->stdout_fd != STDOUT_FILENO)
+                    {
+                        dup2(pr->stdout_fd, STDOUT_FILENO);
+                        close(pr->stdout_fd);
+                    }
+
+                    /* применить stderr */
+                    if (pr->stderr_fd != STDERR_FILENO)
+                    {
+                        dup2(pr->stderr_fd, STDERR_FILENO);
+                        close(pr->stderr_fd);
+                    }
 
                     exec_redir_apply(pr);
                     close_pipes(ctx);
@@ -80,7 +117,7 @@ int exec_pl_spawn(t_exec_ctx *ctx)
             }
             else
             {
-                /* без редиректов — в родителе */
+                /* без редиректов и пайпов — в родителе */
                 int st = builtin_exec(pr->builtin, ctx, pr->argv, argc);
                 ctx->last_pid = -1;
                 job->exit_code = builtin_normalize_status(st);
