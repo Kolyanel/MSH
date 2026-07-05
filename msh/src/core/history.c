@@ -1,8 +1,10 @@
 #include <string.h>
 #include <stdlib.h>
+#include <fcntl.h>
 
 #include "history.h"
 #include "msh_error.h"
+#include "io.h"
 
 
 // инициализация структуры t_hist, обнуление всех полей
@@ -83,4 +85,87 @@ int hist_push(t_hist *h, const char *str)
 		h->size++;
 	
 	return 0;
+}
+
+
+
+
+/*
+* сохранить историю в файл
+*/
+int hist_save(t_hist *hist, const char *filename)
+{
+	if (!hist || !filename)
+		return MS_SET_ERR(EINVAL);
+	
+	int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+	
+	if (fd < 0)
+		return MS_ERR;
+	
+	size_t start = (hist->size < HIST_MAX) ? 0 : hist->head;
+	
+	for (size_t i = 0; i < hist->size; ++i){
+		
+		size_t idx = (start + i) % HIST_MAX;
+		
+		if (!hist->lines[idx])
+			continue;
+		
+		if (puts_fd(fd, hist->lines[idx], 0) < 0 || puts_fd(fd, "\n", 1) < 0){
+			close(fd);
+			return MS_ERR;
+		}
+	}
+	close(fd);
+	return MS_OK;
+}
+
+
+
+
+/*
+* загрузить историю из файла
+*/
+int hist_load(t_hist *hist, const char *filename)
+{
+	if (!hist || !filename)
+		return MS_SET_ERR(EINVAL);
+	
+	int fd = open(filename, O_RDONLY);
+	
+	if (fd < 0)
+		return MS_OK;
+	
+	size_t size;
+	
+	char *data = read_fd(fd, &size);
+	
+	close(fd);
+	
+	if (!data)
+		return MS_OK;
+	
+	char *save = data;
+	char *line;
+	char *rest = data;
+	
+	while(*rest){
+		
+		line = rest;
+		
+		while(*rest && *rest != '\n')
+			rest++;
+		
+		if (*rest == '\n'){
+			*rest = '\0';
+			rest++;
+		}
+		
+		if (*line)
+			hist_push(hist, line);
+	}
+	
+	free(save);
+	return MS_OK;
 }

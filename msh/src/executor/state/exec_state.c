@@ -23,6 +23,8 @@ t_exec_state *exec_state_create(void)
 	
 	st->envp = NULL;
 	
+	st->hist = NULL;
+	
 	st->env_dirty = true;
 	st->interactive = true;
 	

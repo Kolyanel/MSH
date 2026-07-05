@@ -8,6 +8,7 @@
 #include "vector.h"
 #include "msh_signal.h"
 #include "job_control.h"
+#include "history.h"
 
 
 /* --- глобальное состояние выполнения shell --- */
@@ -31,6 +32,8 @@ typedef struct s_exec_state
 	t_sig_state signals;
 	
 	t_job_control job_ctrl;
+	
+	t_hist *hist;
 	
 } t_exec_state;
 

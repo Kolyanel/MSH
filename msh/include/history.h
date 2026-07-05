@@ -54,5 +54,21 @@ void hist_free(t_hist *hist);
 */
 
 int hist_push(t_hist *h, const char *str);
+
+
+
+/*
+ * сохранить историю в файл
+ * возвращает 0 при успехе, -1 при ошибке
+ */
+ int hist_save(t_hist *hist, const char *filename);
+ 
+ 
+ 
+ /*
+ * загрузить историю из файла
+ * возвращает 0 при успехе, -1 при ошибке (нет файла — не ошибка)
+ */
+ int hist_load(t_hist *hist, const char *filename);
 	
 #endif  //HISTORY_H

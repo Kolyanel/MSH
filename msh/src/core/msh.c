@@ -82,6 +82,8 @@ int shell_init(t_shell *sh, int argc, char **argv, char **envp)
         msh_perr_fd(STDERR_FILENO, "init history");
         goto cleanup;
     }
+    
+    hist_load(&sh->hist, "/root/msh_history");
 
     /* Окружение */
     
@@ -107,6 +109,8 @@ int shell_init(t_shell *sh, int argc, char **argv, char **envp)
 	sh->exec_state->env = &sh->env;
 	
 	sh->exec_state->path = &sh->path;
+	
+	sh->exec_state->hist = &sh->hist;
 
     return MS_OK;
 
@@ -126,6 +130,8 @@ void shell_cleanup(t_shell *sh)
 {
     if (!sh)
         return;
+    
+    hist_save(&sh->hist, "/root/msh_history");
 
     hist_free(&sh->hist);
 

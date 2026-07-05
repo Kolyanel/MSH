@@ -38,7 +38,7 @@ void shell_handle_status(t_shell *sh, int status, const char *msg)
 		return;
 	
 	if (errno == 0) {
-        fprintf(stderr, "DEBUG: shell_handle_status called with status=%d, msg='%s', but errno=0\n", status, msg);
+//        fprintf(stderr, "DEBUG: shell_handle_status called with status=%d, msg='%s', but errno=0\n", status, msg);
         return;
     }
 	

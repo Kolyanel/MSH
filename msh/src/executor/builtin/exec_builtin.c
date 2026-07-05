@@ -34,6 +34,9 @@ int bi_bg(t_exec_ctx *ctx, char **argv, size_t argc);
 int bi_jobs(t_exec_ctx *ctx, char **argv, size_t argc);
 
 
+int bi_history(t_exec_ctx *ctx, char **argv, size_t argc);
+
+
 
 static const t_builtin g_builtin[] = {
 	{"cd", bi_cd, true},
@@ -46,6 +49,7 @@ static const t_builtin g_builtin[] = {
 	{"fg", bi_fg, true},
 	{"bg", bi_bg, true},
 	{"jobs", bi_jobs, true},
+	{"history", bi_history, true},
 	{NULL, NULL, false}
 };
 
