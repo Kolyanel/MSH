@@ -1,6 +1,9 @@
 #include <stdlib.h>
+#include <string.h>
 
 #include "readline_internal.h"
+#include "buf.h"
+#include "utf8.h"
 
 
 static void	rl_clear_suggestion(t_rl *rl)
@@ -15,46 +18,14 @@ static void	rl_clear_suggestion(t_rl *rl)
 }
 
 
-
-static int	utf8_cont(unsigned char c)
-{
-	return ((c & 0xC0) == 0x80);
-}
-
-
-
-static size_t	utf8_prev_pos(t_rl *rl, size_t pos)
-{
-	if (!rl || pos == 0)
-		return (0);
-
-
-	pos--;
-
-
-	while (pos > 0
-		&& utf8_cont((unsigned char)rl->buf.data[pos]))
-	{
-		pos--;
-	}
-
-
-	return (pos);
-}
-
-
-
 void	rl_insert(t_rl *rl, const char *s, size_t len)
 {
 	size_t	i;
 
-
 	if (!rl || !s || len == 0)
 		return;
 
-
 	rl_clear_suggestion(rl);
-
 
 	for (i = 0; i < len; i++)
 	{
@@ -62,46 +33,35 @@ void	rl_insert(t_rl *rl, const char *s, size_t len)
 				&rl->buf,
 				rl->cursor,
 				s[i]) < 0)
-		{
 			return;
-		}
-
 
 		rl->cursor++;
 	}
-
 
 	if (rl->cursor > rl->buf.len)
 		rl->cursor = rl->buf.len;
 }
 
 
-
 void	rl_backspace(t_rl *rl)
 {
-	size_t	start;
-
+	size_t	prev;
 
 	if (!rl)
 		return;
 
-
 	if (rl->cursor == 0)
 		return;
 
-
 	rl_clear_suggestion(rl);
 
-
-	start = utf8_prev_pos(
-		rl,
+	prev = utf8_prev(
+		rl->buf.data,
 		rl->cursor);
 
-
-	while (rl->cursor > start)
+	while (rl->cursor > prev)
 	{
 		rl->cursor--;
-
 
 		if (buf_delete(
 				&rl->buf,
@@ -111,48 +71,31 @@ void	rl_backspace(t_rl *rl)
 			return;
 		}
 	}
-
-
-	if (rl->cursor > rl->buf.len)
-		rl->cursor = rl->buf.len;
 }
-
 
 
 void	rl_delete(t_rl *rl)
 {
 	size_t	next;
 
-
 	if (!rl)
 		return;
-
 
 	if (rl->cursor >= rl->buf.len)
 		return;
 
-
 	rl_clear_suggestion(rl);
 
+	next = utf8_next(
+		rl->buf.data,
+		rl->cursor);
 
-	next = rl->cursor + 1;
-
-
-	while (next < rl->buf.len
-		&& utf8_cont((unsigned char)rl->buf.data[next]))
-	{
-		next++;
-	}
-
-
-	while (next > rl->cursor)
+	while (rl->cursor < next)
 	{
 		if (buf_delete(
 				&rl->buf,
 				rl->cursor) < 0)
-		{
 			return;
-		}
 
 		next--;
 	}

@@ -1,7 +1,7 @@
 #include <unistd.h>
-#include <stdint.h>
 
 #include "readline_internal.h"
+#include "utf8.h"
 
 
 
@@ -27,10 +27,8 @@ static int	read_seq(int fd, char *seq, int max)
 			return (i + 1);
 		}
 
-
 		i++;
 	}
-
 
 	return (-1);
 }
@@ -111,35 +109,12 @@ static int	handle_escape(t_rl *rl)
 
 
 
-static int	utf8_len(unsigned char c)
-{
-	if ((c & 0x80) == 0)
-		return (1);
-
-
-	if ((c & 0xE0) == 0xC0)
-		return (2);
-
-
-	if ((c & 0xF0) == 0xE0)
-		return (3);
-
-
-	if ((c & 0xF8) == 0xF0)
-		return (4);
-
-
-	return (1);
-}
-
-
-
 int	rl_read_key(t_rl *rl)
 {
 	char	buf[5];
 	char	c;
-	int		len;
-	int		i;
+	size_t	len;
+	size_t	i;
 
 
 	if (!rl)
@@ -197,7 +172,7 @@ int	rl_read_key(t_rl *rl)
 		buf[0] = c;
 
 
-		len = utf8_len(
+		len = utf8_char_len(
 			(unsigned char)c);
 
 
@@ -213,19 +188,6 @@ int	rl_read_key(t_rl *rl)
 		}
 
 
-		/*
-		** Передаём весь UTF-8 символ.
-		**
-		** Например:
-		**
-		** "я"
-		**
-		** приходит как:
-		**
-		** D1 8F
-		**
-		** и вставляется двумя байтами.
-		*/
 		rl_insert(
 			rl,
 			buf,

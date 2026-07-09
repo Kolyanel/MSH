@@ -8,43 +8,17 @@
 #include "readline_internal.h"
 #include "buf.h"
 #include "io.h"
+#include "utf8.h"
 
 
-
-static void	rl_cleanup(t_rl *rl)
-{
-	if (!rl)
-		return;
-
-	free(rl->prompt);
-	rl->prompt = NULL;
-
-	free(rl->saved_line);
-	rl->saved_line = NULL;
-
-	free(rl->suggestion);
-	rl->suggestion = NULL;
-
-	buf_free(&rl->buf);
-}
-
-
-
-char	*read_line_raw(
-	int		fd,
-	t_hist	*hist,
-	char	*prompt)
+char	*read_line_raw(int fd, t_hist *hist, char *prompt)
 {
 	t_rl			rl;
 	struct termios	raw;
 	int				ret;
 
 
-	memset(
-		&rl,
-		0,
-		sizeof(rl));
-
+	memset(&rl, 0, sizeof(rl));
 
 	rl.fd = fd;
 	rl.hist = hist;
@@ -57,45 +31,32 @@ char	*read_line_raw(
 		if (!rl.prompt)
 			return (NULL);
 
-		rl.prompt_len = visible_len(prompt);
+		rl.prompt_len = utf8_display_len(prompt);
 	}
-
 
 
 	if (buf_init(&rl.buf) < 0)
 	{
-		rl_cleanup(&rl);
+		free(rl.prompt);
 		return (NULL);
 	}
-
 
 
 	if (tcgetattr(fd, &rl.old_t) < 0)
 	{
-		rl_cleanup(&rl);
+		buf_free(&rl.buf);
+		free(rl.prompt);
 		return (NULL);
 	}
-
 
 
 	raw = rl.old_t;
 
 
-	/*
-	** Включаем режим ручного чтения клавиш.
-	*/
 	raw.c_lflag &= ~(ICANON | ECHO);
 
-
-	/*
-	** Оставляем сигналы терминала.
-	*/
 	raw.c_lflag |= ISIG;
 
-
-	/*
-	** Отключаем XON/XOFF.
-	*/
 	raw.c_iflag &= ~(IXON);
 
 
@@ -103,31 +64,28 @@ char	*read_line_raw(
 	raw.c_cc[VTIME] = 0;
 
 
-
-	if (tcsetattr(
-			fd,
-			TCSAFLUSH,
-			&raw) < 0)
+	if (tcsetattr(fd, TCSAFLUSH, &raw) < 0)
 	{
-		rl_cleanup(&rl);
+		buf_free(&rl.buf);
+		free(rl.prompt);
 		return (NULL);
 	}
 
 
-
 	rl_redraw(&rl);
-
 
 
 	while (1)
 	{
 		ret = rl_read_key(&rl);
 
-
 		if (ret == -1)
 		{
 			rl_restore(&rl);
-			rl_cleanup(&rl);
+
+			buf_free(&rl.buf);
+			free(rl.prompt);
+
 			return (NULL);
 		}
 
@@ -140,9 +98,13 @@ char	*read_line_raw(
 	}
 
 
-
-	rl_restore(&rl);
-
+	if (rl.prev_rows > 1)
+	{
+		printf_fd(
+			fd,
+			"\033[%zuB",
+			rl.prev_rows - 1);
+	}
 
 
 	puts_fd(
@@ -151,18 +113,10 @@ char	*read_line_raw(
 		2);
 
 
+	rl_restore(&rl);
+
 
 	free(rl.prompt);
-	rl.prompt = NULL;
-
-
-	free(rl.saved_line);
-	rl.saved_line = NULL;
-
-
-	free(rl.suggestion);
-	rl.suggestion = NULL;
-
 
 
 	if (rl.buf.len == 0)
@@ -172,17 +126,14 @@ char	*read_line_raw(
 	}
 
 
-
 	return (buf_finalize(&rl.buf));
 }
-
 
 
 void	rl_restore(t_rl *rl)
 {
 	if (!rl)
 		return;
-
 
 	tcsetattr(
 		rl->fd,

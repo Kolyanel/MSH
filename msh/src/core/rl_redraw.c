@@ -4,7 +4,7 @@
 
 #include "readline_internal.h"
 #include "io.h"
-
+#include "utf8.h"
 
 
 static void	rl_update_term_size(t_rl *rl)
@@ -16,10 +16,7 @@ static void	rl_update_term_size(t_rl *rl)
 		return;
 
 
-	if (ioctl(
-			rl->fd,
-			TIOCGWINSZ,
-			&ws) < 0)
+	if (ioctl(rl->fd, TIOCGWINSZ, &ws) < 0)
 	{
 		rl->term_cols = 80;
 		rl->term_rows = 24;
@@ -37,15 +34,17 @@ static void	rl_update_term_size(t_rl *rl)
 
 
 
-static size_t	rl_total_len(t_rl *rl)
+static size_t	rl_total_display_len(t_rl *rl)
 {
 	if (!rl)
 		return (0);
 
 
 	return (
-		rl->prompt_len +
-		rl->buf.len);
+		rl->prompt_len
+		+
+		utf8_display_len(rl->buf.data)
+	);
 }
 
 
@@ -59,7 +58,7 @@ static size_t	rl_calc_rows(t_rl *rl)
 		return (1);
 
 
-	len = rl_total_len(rl);
+	len = rl_total_display_len(rl);
 
 
 	if (len == 0)
@@ -67,8 +66,12 @@ static size_t	rl_calc_rows(t_rl *rl)
 
 
 	return (
-		(len - 1) /
-		(size_t)rl->term_cols + 1);
+		(len - 1)
+		/
+		(size_t)rl->term_cols
+		+
+		1
+	);
 }
 
 
@@ -101,7 +104,6 @@ static void	rl_clear_previous(t_rl *rl)
 		rl->prev_rows - 1);
 
 
-
 	for (i = 0; i < rl->prev_rows; i++)
 	{
 		puts_fd(
@@ -118,7 +120,6 @@ static void	rl_clear_previous(t_rl *rl)
 				4);
 		}
 	}
-
 
 
 	rl_move_up(
@@ -144,16 +145,56 @@ static void	rl_calc_cursor(t_rl *rl)
 
 
 	pos =
-		rl->prompt_len +
-		rl->cursor;
+		rl->prompt_len
+		+
+		utf8_display_pos(
+			rl->buf.data,
+			rl->cursor);
 
 
 	rl->prev_cursor_row =
-		pos / (size_t)rl->term_cols;
+		pos
+		/
+		(size_t)rl->term_cols;
 
 
 	rl->prev_cursor_col =
-		pos % (size_t)rl->term_cols;
+		pos
+		%
+		(size_t)rl->term_cols;
+}
+
+
+
+static void	rl_place_cursor_end(t_rl *rl)
+{
+	size_t	current;
+	size_t	target;
+
+
+	if (!rl)
+		return;
+
+
+	current =
+		rl_total_display_len(rl);
+
+
+	target =
+		rl->prompt_len
+		+
+		utf8_display_pos(
+			rl->buf.data,
+			rl->cursor);
+
+
+	if (current > target)
+	{
+		printf_fd(
+			rl->fd,
+			"\033[%zuD",
+			current - target);
+	}
 }
 
 
@@ -161,7 +202,6 @@ static void	rl_calc_cursor(t_rl *rl)
 void	rl_redraw(t_rl *rl)
 {
 	size_t	rows;
-	size_t	back;
 
 
 	if (!rl)
@@ -175,7 +215,6 @@ void	rl_redraw(t_rl *rl)
 		rl_clear_previous(rl);
 
 
-
 	if (rl->prompt)
 	{
 		puts_fd(
@@ -183,7 +222,6 @@ void	rl_redraw(t_rl *rl)
 			rl->prompt,
 			strlen(rl->prompt));
 	}
-
 
 
 	if (rl->buf.len)
@@ -195,7 +233,6 @@ void	rl_redraw(t_rl *rl)
 	}
 
 
-
 	rows = rl_calc_rows(rl);
 
 	rl->prev_rows = rows;
@@ -204,19 +241,5 @@ void	rl_redraw(t_rl *rl)
 	rl_calc_cursor(rl);
 
 
-
-	/*
-	** Курсор после вывода стоит в конце.
-	** Возвращаем его на позицию редактирования.
-	*/
-	back = rl->buf.len - rl->cursor;
-
-
-	if (back)
-	{
-		printf_fd(
-			rl->fd,
-			"\033[%zuD",
-			back);
-	}
+	rl_place_cursor_end(rl);
 }
