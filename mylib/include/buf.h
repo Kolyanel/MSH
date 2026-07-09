@@ -43,4 +43,10 @@ char *buf_finalize(t_buf *b);
 void buf_free(t_buf *b);
 
 
+int buf_insert(t_buf *b, size_t pos, char c);
+
+
+int buf_delete(t_buf *b, size_t pos);
+
+
 #endif  //  BUF_H

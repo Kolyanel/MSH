@@ -154,3 +154,41 @@ void buf_free(t_buf *b)
 	b->len = 0;
 	b->cap = 0;
 }
+
+
+
+int buf_insert(t_buf *b, size_t pos, char c)
+{
+	if (!b || !b->data || pos > b->len)
+		return (errno = EINVAL, -1);
+
+	if (buf_reserve(b, 1) < 0)
+		return -1;
+
+	memmove(b->data + pos + 1,
+			b->data + pos,
+			b->len - pos);
+
+	b->data[pos] = c;
+	b->len++;
+	b->data[b->len] = '\0';
+
+	return 0;
+}
+
+
+
+int buf_delete(t_buf *b, size_t pos)
+{
+	if (!b || !b->data || pos >= b->len)
+		return (errno = EINVAL, -1);
+
+	memmove(b->data + pos,
+			b->data + pos + 1,
+			b->len - pos - 1);
+
+	b->len--;
+	b->data[b->len] = '\0';
+
+	return 0;
+}

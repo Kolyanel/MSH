@@ -115,6 +115,8 @@ char *sh_build_prompt(t_shell *sh)
 	size_t len = 0;
 	size_t cap = 0;
 	
+//	if (appendf(&buf, &len, &cap, "msh: %s: >> ", display) < 0){
+	
 	if (appendf(&buf, &len, &cap, "%s%smsh: %s%s%s: >> ", C_BOLD, C_YELLOW, C_GREEN, display, C_RESET) < 0){
 		free(short_pwd);
 		free(buf);

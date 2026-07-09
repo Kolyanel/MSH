@@ -39,6 +39,10 @@
 #define DEBUG_EXPAND 1
 #endif
 
+#ifndef DEBUG_READLINE
+#define DEBUG_READLINE 1
+#endif
+
 #else
 # define DEBUG_EXEC 0
 # define DEBUG_PIPE 0
@@ -46,6 +50,7 @@
 # define DEBUG_SPAWN 0
 # define DEBUG_REDIR 0
 #define DEBUG_EXPAND 0
+#define DEBUG_READLINE 0
 
 #endif
 
@@ -95,6 +100,13 @@ int printf_fd(int out_fd, const char *fmt, ...);
 	do { printf_fd(STDERR_FILENO, "[EXPAND] " fmt, ##__VA_ARGS__); } while (0)
 #else
 #define DBG_EXPAND(fmt, ...) do {} while (0)
+#endif
+
+#if DEBUG_READLINE
+# define DBG_READLINE(fmt, ...) \
+    do { printf_fd(STDERR_FILENO, "[READLINE] " fmt, ##__VA_ARGS__); } while (0)
+#else
+# define DBG_READLINE(fmt, ...) do {} while (0)
 #endif
 
 #endif // MSH_DEBUG_H

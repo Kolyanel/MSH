@@ -8,78 +8,177 @@
 #include "exec_pipe.h"
 #include "msh_debug.h"
 
-void close_pipes(t_exec_ctx *ctx)
+
+void	close_pipes(t_exec_ctx *ctx)
 {
-    if (!ctx || !ctx->pipes.val)
-        return;
+	t_exec_pipe	**pipes;
+	size_t		cnt;
 
-    t_exec_pipe **pipes = (t_exec_pipe**)ctx->pipes.val;
-    size_t cnt = vec_size(&ctx->pipes);
 
-    for (size_t i = 0; i < cnt; ++i)
-    {
-        if (!pipes[i])
-            continue;
+	if (!ctx || !ctx->pipes.val)
+		return;
 
-        if (pipes[i]->fd[0] >= 0)
-            close(pipes[i]->fd[0]);
-        if (pipes[i]->fd[1] >= 0)
-            close(pipes[i]->fd[1]);
 
-        pipes[i]->fd[0] = -1;
-        pipes[i]->fd[1] = -1;
-    }
+	pipes = (t_exec_pipe **)ctx->pipes.val;
+	cnt = vec_size(&ctx->pipes);
+
+
+	for (size_t i = 0; i < cnt; i++)
+	{
+		if (!pipes[i])
+			continue;
+
+
+		if (pipes[i]->fd[0] >= 0)
+		{
+			close(pipes[i]->fd[0]);
+			pipes[i]->fd[0] = -1;
+		}
+
+
+		if (pipes[i]->fd[1] >= 0)
+		{
+			close(pipes[i]->fd[1]);
+			pipes[i]->fd[1] = -1;
+		}
+	}
 }
 
-int exec_pl_apply_process(t_exec_ctx *ctx, size_t i)
+
+
+static int	apply_fd(int fd, int target)
 {
-    assert(ctx);
+	if (fd == target)
+		return (0);
 
-    if (!ctx || !ctx->job || !ctx->state || !ctx->state->envp)
-        return (errno = EINVAL, -1);
 
-    t_exec_process *pr =
-        ((t_exec_process**)ctx->job->processes.val)[i];
+	if (dup2(fd, target) < 0)
+		return (-1);
 
-    if (!pr || !pr->argv || !pr->argv[0])
-        _exit(127);
 
-    DBG_REDIR("apply pid=%d cmd=%s\n", getpid(), pr->argv[0]);
+	close(fd);
 
-    /* stdin */
-    if (pr->stdin_fd == -1)
-    {
-        int devnull = open("/dev/null", O_RDONLY);
-        if (devnull >= 0)
-        {
-            dup2(devnull, STDIN_FILENO);
-            close(devnull);
-        }
-        else
-        {
-            close(STDIN_FILENO);
-        }
-    }
-    else if (pr->stdin_fd != STDIN_FILENO)
-    {
-        dup2(pr->stdin_fd, STDIN_FILENO);
-    }
+	return (0);
+}
 
-    /* stdout */
-    if (pr->stdout_fd != STDOUT_FILENO)
-        dup2(pr->stdout_fd, STDOUT_FILENO);
 
-    /* stderr */
-    if (pr->stderr_fd != STDERR_FILENO)
-        dup2(pr->stderr_fd, STDERR_FILENO);
 
-    exec_redir_apply(pr);
+static int	apply_process_fds(t_exec_process *pr)
+{
+	int	devnull;
 
-    close_pipes(ctx);
 
-    signal(SIGPIPE, SIG_DFL);
+	if (!pr)
+		return (errno = EINVAL, -1);
 
-    execve(pr->exec_path, pr->argv, ctx->state->envp);
 
-    _exit(errno == ENOENT ? 127 : 126);
+
+	/*
+	** stdin
+	*/
+	if (pr->stdin_fd == -1)
+	{
+		devnull = open("/dev/null", O_RDONLY);
+
+		if (devnull < 0)
+			return (-1);
+
+
+		if (apply_fd(devnull, STDIN_FILENO) < 0)
+			return (-1);
+	}
+	else if (pr->stdin_fd != STDIN_FILENO)
+	{
+		if (apply_fd(pr->stdin_fd, STDIN_FILENO) < 0)
+			return (-1);
+	}
+
+
+
+	/*
+	** stdout
+	*/
+	if (pr->stdout_fd != STDOUT_FILENO)
+	{
+		if (apply_fd(pr->stdout_fd, STDOUT_FILENO) < 0)
+			return (-1);
+	}
+
+
+
+	/*
+	** stderr
+	*/
+	if (pr->stderr_fd != STDERR_FILENO)
+	{
+		if (apply_fd(pr->stderr_fd, STDERR_FILENO) < 0)
+			return (-1);
+	}
+
+
+	return (0);
+}
+
+
+
+int	exec_pl_apply_process(t_exec_ctx *ctx, size_t i)
+{
+	t_exec_process	*pr;
+
+
+	assert(ctx);
+
+
+	if (!ctx
+		|| !ctx->job
+		|| !ctx->state
+		|| !ctx->state->envp)
+		return (errno = EINVAL, -1);
+
+
+
+	pr = ((t_exec_process **)ctx->job->processes.val)[i];
+
+
+	if (!pr || !pr->argv || !pr->argv[0])
+		return (errno = EINVAL, -1);
+
+
+
+	DBG_REDIR(
+		"apply pid=%d cmd=%s stdin=%d stdout=%d stderr=%d\n",
+		getpid(),
+		pr->argv[0],
+		pr->stdin_fd,
+		pr->stdout_fd,
+		pr->stderr_fd);
+
+
+
+	if (apply_process_fds(pr) < 0)
+		return (-1);
+
+
+
+	if (exec_redir_apply(pr) < 0)
+		return (-1);
+
+
+
+	close_pipes(ctx);
+
+
+
+signal(SIGPIPE, SIG_DFL);
+
+
+
+	execve(
+		pr->exec_path,
+		pr->argv,
+		ctx->state->envp);
+
+
+
+return (-1);
 }
