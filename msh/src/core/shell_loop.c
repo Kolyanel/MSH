@@ -75,10 +75,10 @@ int	shell_loop(t_shell *sh)
 		errno = 0;
 
 
-		sh->cur_line = read_line_raw(
-			sh->tty_fd,
-			&sh->hist,
-			prompt);
+		sh->cur_line = readline_fd(
+        sh->tty_fd,
+        prompt,
+        &sh->hist);
 
 
 		free(prompt);

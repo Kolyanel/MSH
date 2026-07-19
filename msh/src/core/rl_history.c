@@ -1,180 +1,264 @@
-#include <stdlib.h>
 #include <string.h>
 
 #include "readline_internal.h"
-#include "buf.h"
-#include "msh_debug.h"
 
 
+/*
+** ============================================================
+** Replace current line
+**
+** Replace editable buffer content.
+**
+** Cursor is stored as byte offset.
+**
+** ============================================================
+*/
 
-static void	rl_clear_suggestion(t_rl *rl)
+void rl_replace_line(
+        t_rl *rl,
+        const char *s)
 {
-	if (!rl)
-		return;
+    size_t len;
 
-	free(rl->suggestion);
-	rl->suggestion = NULL;
-	rl->sugg_len = 0;
+
+    if (!rl)
+        return;
+
+
+    if (!s)
+        s = "";
+
+
+    len = strlen(s);
+
+
+
+    rl->line.len = 0;
+
+
+    if (rl->line.data)
+        rl->line.data[0] = '\0';
+
+
+
+    if (buf_append_span(
+            &rl->line,
+            s,
+            len) < 0)
+    {
+        return;
+    }
+
+
+
+    rl->cursor = len;
+
+
+    rl_clear_suggestion(rl);
 }
 
 
 
-static int	rl_load_history_line(t_rl *rl, const char *line)
+/*
+** ============================================================
+** Save current line
+**
+** Save user input before entering history.
+**
+** ============================================================
+*/
+
+void rl_save_current_line(
+        t_rl *rl)
 {
-	if (!rl || !line)
-		return (-1);
+    if (!rl)
+        return;
 
 
-	buf_free(&rl->buf);
+
+    rl->saved_line.len = 0;
 
 
-	if (buf_init(&rl->buf) < 0)
-		return (-1);
+    if (rl->saved_line.data)
+        rl->saved_line.data[0] = '\0';
 
 
-	if (buf_append_span(&rl->buf, line, strlen(line)) < 0)
-	{
-		buf_free(&rl->buf);
-		return (-1);
-	}
+
+    if (!rl->line.data)
+        return;
 
 
-	rl->cursor = rl->buf.len;
 
+    if (buf_append_span(
+            &rl->saved_line,
+            rl->line.data,
+            rl->line.len) < 0)
+    {
+        rl->saved_line.len = 0;
 
-	rl_clear_suggestion(rl);
-
-
-	rl_redraw(rl);
-
-	return (0);
+        if (rl->saved_line.data)
+            rl->saved_line.data[0] = '\0';
+    }
 }
 
 
 
-static char	*rl_save_current_line(t_rl *rl)
+/*
+** ============================================================
+** Free saved line
+**
+** Release temporary history buffer.
+**
+** ============================================================
+*/
+
+void rl_free_saved_line(
+        t_rl *rl)
 {
-	if (!rl || !rl->buf.data)
-		return (NULL);
+    if (!rl)
+        return;
 
 
-	return (strdup(rl->buf.data));
+    buf_free(
+            &rl->saved_line);
+
+
+    buf_init(
+            &rl->saved_line);
 }
 
 
 
-void	rl_history_up(t_rl *rl)
+/*
+** ============================================================
+** History UP
+**
+** Move to older command.
+**
+** ============================================================
+*/
+
+void rl_history_up(
+        t_rl *rl)
 {
-	size_t	start;
-	size_t	idx;
+    t_hist *h;
 
 
-	if (!rl || !rl->hist)
-		return;
+    if (!rl || !rl->hist)
+        return;
 
 
-	if (rl->hist->size == 0)
-		return;
+    h = rl->hist;
 
 
-	if (rl->hist_idx == 0)
-	{
-		free(rl->saved_line);
 
-		rl->saved_line = rl_save_current_line(rl);
+    if (h->size == 0)
+        return;
 
 
-		rl->hist_idx = rl->hist->size;
-	}
+
+    /*
+    ** First history movement.
+    */
+
+    if (h->index == h->head)
+        rl_save_current_line(rl);
 
 
-	if (rl->hist_idx == 0)
-		return;
+
+    /*
+    ** Move backward.
+    */
+
+    if (h->index == 0)
+        h->index = HIST_MAX - 1;
+    else
+        h->index--;
 
 
-	rl->hist_idx--;
+
+    if (!h->lines[h->index])
+        return;
 
 
-	start = (rl->hist->size < HIST_MAX)
-		? 0
-		: rl->hist->head;
 
-
-	idx = (start + rl->hist_idx) % HIST_MAX;
-
-
-	if (!rl->hist->lines[idx])
-		return;
-
-
-	if (rl_load_history_line(rl, rl->hist->lines[idx]) < 0)
-		DBG_READLINE("history up: load failed\n");
+    rl_replace_line(
+            rl,
+            h->lines[h->index]);
 }
 
 
 
-void	rl_history_down(t_rl *rl)
+/*
+** ============================================================
+** History DOWN
+**
+** Move to newer command.
+**
+** ============================================================
+*/
+
+void rl_history_down(
+        t_rl *rl)
 {
-	size_t	start;
-	size_t	idx;
+    t_hist *h;
 
 
-	if (!rl || !rl->hist)
-		return;
+    if (!rl || !rl->hist)
+        return;
 
 
-	if (rl->hist_idx == 0)
-		return;
+    h = rl->hist;
 
 
-	rl->hist_idx++;
+
+    if (h->size == 0)
+        return;
 
 
-	if (rl->hist_idx >= rl->hist->size)
-	{
-		buf_free(&rl->buf);
+
+    /*
+    ** Already at newest position.
+    */
+
+    if (h->index == h->head)
+        return;
 
 
-		if (buf_init(&rl->buf) == 0 && rl->saved_line)
-		{
-			buf_append_span(
-				&rl->buf,
-				rl->saved_line,
-				strlen(rl->saved_line));
-		}
+
+    h->index++;
 
 
-		rl->cursor = rl->buf.len;
+
+    if (h->index >= HIST_MAX)
+        h->index = 0;
 
 
-		free(rl->saved_line);
-		rl->saved_line = NULL;
+
+    /*
+    ** Returned after newest command.
+    */
+
+    if (h->index == h->head)
+    {
+        rl_replace_line(
+                rl,
+                rl->saved_line.data
+                    ? rl->saved_line.data
+                    : "");
 
 
-		rl_clear_suggestion(rl);
+        rl_free_saved_line(rl);
+
+        return;
+    }
 
 
-		rl->hist_idx = 0;
 
-
-		rl_redraw(rl);
-
-		return;
-	}
-
-
-	start = (rl->hist->size < HIST_MAX)
-		? 0
-		: rl->hist->head;
-
-
-	idx = (start + rl->hist_idx) % HIST_MAX;
-
-
-	if (!rl->hist->lines[idx])
-		return;
-
-
-	if (rl_load_history_line(rl, rl->hist->lines[idx]) < 0)
-		DBG_READLINE("history down: load failed\n");
+    if (h->lines[h->index])
+    {
+        rl_replace_line(
+                rl,
+                h->lines[h->index]);
+    }
 }

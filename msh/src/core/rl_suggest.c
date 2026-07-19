@@ -2,139 +2,188 @@
 #include <string.h>
 
 #include "readline_internal.h"
-#include "buf.h"
-#include "msh_debug.h"
+#include "utf8.h"
 
 
-static void	rl_clear_suggestion(t_rl *rl)
+
+/*
+** ============================================================
+** Clear autosuggestion
+**
+** ============================================================
+*/
+
+void rl_clear_suggestion(
+        t_rl *rl)
 {
-	if (!rl)
-		return;
+    if (!rl)
+        return;
 
-	free(rl->suggestion);
 
-	rl->suggestion = NULL;
-	rl->sugg_len = 0;
+    free(rl->suggestion);
+
+    rl->suggestion = NULL;
+
+    rl->suggestion_bytes = 0;
+    rl->suggestion_cols = 0;
 }
 
 
 
-void	rl_suggest(t_rl *rl)
+/*
+** ============================================================
+** Search history suggestion
+**
+** Finds latest history entry starting with current line.
+**
+** ============================================================
+*/
+
+void rl_suggest(
+        t_rl *rl)
 {
-	size_t		start;
-	size_t		idx;
-	size_t		i;
-	const char	*line;
+    size_t i;
+    size_t index;
+    size_t start;
+
+    const char *line;
 
 
-	if (!rl)
-		return;
+    if (!rl)
+        return;
 
 
-	rl_clear_suggestion(rl);
+    rl_clear_suggestion(rl);
 
 
-	if (!rl->hist)
-		return;
+
+    if (!rl->hist)
+        return;
 
 
-	if (rl->hist->size == 0)
-		return;
+    if (rl->hist->size == 0)
+        return;
 
 
-	if (!rl->buf.data || rl->buf.len == 0)
-		return;
+    if (!rl->line.data || rl->line.len == 0)
+        return;
 
 
-	start = (rl->hist->size < HIST_MAX)
-		? 0
-		: rl->hist->head;
+
+    /*
+    ** History is circular buffer.
+    */
+
+    if (rl->hist->size < HIST_MAX)
+        start = 0;
+    else
+        start = rl->hist->head;
 
 
-	i = rl->hist->size;
+
+    i = rl->hist->size;
 
 
-	while (i > 0)
-	{
-		idx = (start + i - 1) % HIST_MAX;
-
-		line = rl->hist->lines[idx];
+    while (i > 0)
+    {
+        i--;
 
 
-		if (line
-			&& strncmp(
-				line,
-				rl->buf.data,
-				rl->buf.len) == 0
-			&& strlen(line) > rl->buf.len)
-		{
-			rl->suggestion = strdup(line);
+        index = (start + i) % HIST_MAX;
 
 
-			if (!rl->suggestion)
-			{
-				DBG_READLINE(
-					"suggest: strdup failed\n");
-
-				return;
-			}
+        line = rl->hist->lines[index];
 
 
-			rl->sugg_len =
-				strlen(rl->suggestion);
+        if (!line)
+            continue;
 
 
-			return;
-		}
+
+        if (strncmp(
+                line,
+                rl->line.data,
+                rl->line.len) != 0)
+        {
+            continue;
+        }
 
 
-		i--;
-	}
+
+        if (strlen(line) <= rl->line.len)
+            continue;
+
+
+
+        rl->suggestion = strdup(
+                line + rl->line.len);
+
+
+        if (!rl->suggestion)
+            return;
+
+
+
+        rl->suggestion_bytes =
+                strlen(rl->suggestion);
+
+
+
+        rl->suggestion_cols =
+                utf8_display_width(
+                        rl->suggestion);
+
+
+
+        return;
+    }
 }
 
 
 
-void	rl_accept_suggestion(t_rl *rl)
+/*
+** ============================================================
+** Accept autosuggestion
+**
+** Append suggestion to editable buffer.
+**
+** ============================================================
+*/
+
+void rl_accept_suggestion(
+        t_rl *rl)
 {
-	if (!rl)
-		return;
+    if (!rl)
+        return;
 
 
-	if (!rl->suggestion)
-		return;
+    if (!rl->suggestion)
+        return;
 
 
-	if (rl->cursor != rl->buf.len)
-		return;
+    /*
+    ** Suggestion is only valid at end of line.
+    */
+
+    if (rl->cursor != rl->line.len)
+        return;
 
 
 
-	buf_free(&rl->buf);
+    if (buf_append_span(
+            &rl->line,
+            rl->suggestion,
+            rl->suggestion_bytes) < 0)
+    {
+        return;
+    }
 
 
-	if (buf_init(&rl->buf) < 0)
-	{
-		rl_clear_suggestion(rl);
-		return;
-	}
+
+    rl->cursor =
+            rl->line.len;
 
 
-	if (buf_append_span(
-			&rl->buf,
-			rl->suggestion,
-			rl->sugg_len) < 0)
-	{
-		buf_free(&rl->buf);
-		buf_init(&rl->buf);
 
-		rl_clear_suggestion(rl);
-
-		return;
-	}
-
-
-	rl->cursor = rl->buf.len;
-
-
-	rl_clear_suggestion(rl);
+    rl_clear_suggestion(rl);
 }

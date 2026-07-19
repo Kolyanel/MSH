@@ -1,11 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <locale.h>
 
 #include "msh.h"
 
 
 int main(int argc, char *argv[], char **envp)
 {
+	
+	setlocale(LC_ALL, "");
 
     // создаем и инициализируем структуру всего проекта
     t_shell sh = {0};

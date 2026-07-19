@@ -5,16 +5,21 @@
 
 /*
 ** ============================================================
-** Move cursor left by one UTF-8 character
+** Backspace
 **
-** Cursor stores byte offset inside line buffer.
+** Delete UTF-8 character before cursor.
+**
+** Cursor position is stored in bytes.
 **
 ** ============================================================
 */
 
-void rl_cursor_left(
+void rl_backspace(
         t_rl *rl)
 {
+    size_t prev;
+
+
     if (!rl)
         return;
 
@@ -27,24 +32,48 @@ void rl_cursor_left(
         return;
 
 
-    rl->cursor =
+
+    prev =
         utf8_prev(
                 rl->line.data,
                 rl->cursor);
+
+
+
+    if (buf_delete_range(
+            &rl->line,
+            prev,
+            rl->cursor - prev) < 0)
+    {
+        return;
+    }
+
+
+
+    rl->cursor = prev;
+
+
+
+    /*
+    ** Current suggestion became invalid.
+    */
+    rl_clear_suggestion(rl);
 }
 
 
 
 /*
 ** ============================================================
-** Move cursor right by one UTF-8 character
+** Delete
 **
-** Cursor stores byte offset.
+** Delete UTF-8 character at cursor.
+**
+** Cursor does not move.
 **
 ** ============================================================
 */
 
-void rl_cursor_right(
+void rl_delete(
         t_rl *rl)
 {
     size_t next;
@@ -62,6 +91,7 @@ void rl_cursor_right(
         return;
 
 
+
     next =
         utf8_next(
                 rl->line.data,
@@ -69,48 +99,23 @@ void rl_cursor_right(
 
 
 
-    if (next > rl->cursor
-        && next <= rl->line.len)
+    if (next <= rl->cursor)
+        return;
+
+
+
+    if (buf_delete_range(
+            &rl->line,
+            rl->cursor,
+            next - rl->cursor) < 0)
     {
-        rl->cursor = next;
+        return;
     }
-}
 
 
 
-/*
-** ============================================================
-** Move cursor to beginning
-**
-** ============================================================
-*/
-
-void rl_cursor_home(
-        t_rl *rl)
-{
-    if (!rl)
-        return;
-
-
-    rl->cursor = 0;
-}
-
-
-
-/*
-** ============================================================
-** Move cursor to end
-**
-** ============================================================
-*/
-
-void rl_cursor_end(
-        t_rl *rl)
-{
-    if (!rl)
-        return;
-
-
-    rl->cursor =
-        rl->line.len;
+    /*
+    ** Cursor stays at the same byte position.
+    */
+    rl_clear_suggestion(rl);
 }

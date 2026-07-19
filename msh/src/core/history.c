@@ -1,171 +1,264 @@
-#include <string.h>
-#include <stdlib.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdio.h>
 
 #include "history.h"
-#include "msh_error.h"
-#include "io.h"
 
 
-// инициализация структуры t_hist, обнуление всех полей
 
-int hist_init(t_hist *hist)
+int hist_init(
+        t_hist *hist)
 {
-	if (!hist)
-		return MS_SET_ERR(EINVAL);
-	
-	memset(hist, 0, sizeof(*hist));
-	
-// лучше так делать
-//	*hist = (t_hist) {0};
-	
-	return MS_OK;
+    if (!hist)
+    {
+        errno = EINVAL;
+        return (-1);
+    }
+
+
+    memset(
+            hist,
+            0,
+            sizeof(*hist));
+
+
+    return (0);
 }
 
 
 
-
-// очистка hist. безопасная для cleanup
-
-void hist_free(t_hist *hist)
+void hist_free(
+        t_hist *hist)
 {
-	if(!hist)
-		return;
-	
-	for(size_t i = 0; i < HIST_MAX; ++i){
-		free(hist->lines[i]);
-	}
-//	*hist = (t_hist) {0};
-	memset(hist, 0, sizeof(*hist));
+    size_t i;
+
+
+    if (!hist)
+        return;
+
+
+    i = 0;
+
+    while (i < HIST_MAX)
+    {
+        free(hist->lines[i]);
+        i++;
+    }
+
+
+    memset(
+            hist,
+            0,
+            sizeof(*hist));
 }
 
 
 
-
-/*
-* кольцевое добавление команд пользователя
-в историю t_hist
- * игнорируются пустые строки и подряд идущие
- одинаковые команды
- * устанавливает errno
- * возвращает:
- 	0 - успех
- 	-1 - ошибка
-*/
-
-int hist_push(t_hist *h, const char *str)
+int hist_push(
+        t_hist *hist,
+        const char *str)
 {
-	if (!h || !str || !*str){
-		errno = EINVAL;
-		return -1;
-	}
-	
-	errno = 0;
-		
-	size_t last = (HIST_MAX + h->head - 1) % HIST_MAX;
-	
-	if (h->size > 0 && strcmp(h->lines[last], str) == 0)
-		return 0;
-	
-	char *copy = strdup(str);
-	if (!copy){
-		errno = ENOMEM;
-		return -1;
-	}
-	
-	free(h->lines[h->head]);
-	
-	h->lines[h->head] = copy;
-		
-	h->head = (h->head + 1) % HIST_MAX;
-	
-	h->index = h->head;
-		
-	if (h->size < HIST_MAX)
-		h->size++;
-	
-	return 0;
+    char *copy;
+    size_t last;
+
+
+    if (!hist || !str || !*str)
+    {
+        errno = EINVAL;
+        return (-1);
+    }
+
+
+
+    if (hist->size > 0)
+    {
+        last = (hist->head + HIST_MAX - 1)
+                % HIST_MAX;
+
+
+        if (hist->lines[last]
+            && strcmp(hist->lines[last], str) == 0)
+        {
+            return (0);
+        }
+    }
+
+
+
+    copy = strdup(str);
+
+    if (!copy)
+    {
+        errno = ENOMEM;
+        return (-1);
+    }
+
+
+
+    free(hist->lines[hist->head]);
+
+
+    hist->lines[hist->head] = copy;
+
+
+    hist->head =
+        (hist->head + 1) % HIST_MAX;
+
+
+    if (hist->size < HIST_MAX)
+        hist->size++;
+
+
+    hist->index = hist->head;
+
+
+    return (0);
 }
 
 
 
-
-/*
-* сохранить историю в файл
-*/
-int hist_save(t_hist *hist, const char *filename)
+int hist_save(
+        t_hist *hist,
+        const char *filename)
 {
-	if (!hist || !filename)
-		return MS_SET_ERR(EINVAL);
-	
-	int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-	
-	if (fd < 0)
-		return MS_ERR;
-	
-	size_t start = (hist->size < HIST_MAX) ? 0 : hist->head;
-	
-	for (size_t i = 0; i < hist->size; ++i){
-		
-		size_t idx = (start + i) % HIST_MAX;
-		
-		if (!hist->lines[idx])
-			continue;
-		
-		if (puts_fd(fd, hist->lines[idx], 0) < 0 || puts_fd(fd, "\n", 1) < 0){
-			close(fd);
-			return MS_ERR;
-		}
-	}
-	close(fd);
-	return MS_OK;
+    int fd;
+    size_t start;
+    size_t i;
+
+
+    if (!hist || !filename)
+    {
+        errno = EINVAL;
+        return (-1);
+    }
+
+
+
+    fd = open(
+            filename,
+            O_WRONLY | O_CREAT | O_TRUNC,
+            0600);
+
+
+    if (fd < 0)
+        return (-1);
+
+
+
+    start = (hist->size == HIST_MAX)
+        ? hist->head
+        : 0;
+
+
+
+    i = 0;
+
+    while (i < hist->size)
+    {
+        size_t idx;
+
+
+        idx = (start + i) % HIST_MAX;
+
+
+        if (hist->lines[idx])
+        {
+            if (write(
+                    fd,
+                    hist->lines[idx],
+                    strlen(hist->lines[idx])) < 0)
+            {
+                close(fd);
+                return (-1);
+            }
+
+
+            if (write(
+                    fd,
+                    "\n",
+                    1) < 0)
+            {
+                close(fd);
+                return (-1);
+            }
+        }
+
+
+        i++;
+    }
+
+
+
+    close(fd);
+
+
+    return (0);
 }
 
 
 
-
-/*
-* загрузить историю из файла
-*/
-int hist_load(t_hist *hist, const char *filename)
+int hist_load(
+        t_hist *hist,
+        const char *filename)
 {
-	if (!hist || !filename)
-		return MS_SET_ERR(EINVAL);
-	
-	int fd = open(filename, O_RDONLY);
-	
-	if (fd < 0)
-		return MS_OK;
-	
-	size_t size;
-	
-	char *data = read_fd(fd, &size);
-	
-	close(fd);
-	
-	if (!data)
-		return MS_OK;
-	
-	char *save = data;
-	char *line;
-	char *rest = data;
-	
-	while(*rest){
-		
-		line = rest;
-		
-		while(*rest && *rest != '\n')
-			rest++;
-		
-		if (*rest == '\n'){
-			*rest = '\0';
-			rest++;
-		}
-		
-		if (*line)
-			hist_push(hist, line);
-	}
-	
-	free(save);
-	return MS_OK;
+    FILE *fp;
+    char *line;
+    size_t len;
+
+
+    if (!hist || !filename)
+    {
+        errno = EINVAL;
+        return (-1);
+    }
+
+
+
+    fp = fopen(
+            filename,
+            "r");
+
+
+    if (!fp)
+    {
+        if (errno == ENOENT)
+            return (0);
+
+        return (-1);
+    }
+
+
+
+    line = NULL;
+    len = 0;
+
+
+    while (getline(&line, &len, fp) >= 0)
+    {
+        size_t n;
+
+
+        n = strlen(line);
+
+
+        if (n > 0 && line[n - 1] == '\n')
+            line[n - 1] = '\0';
+
+
+        hist_push(
+                hist,
+                line);
+    }
+
+
+
+    free(line);
+
+    fclose(fp);
+
+
+    return (0);
 }

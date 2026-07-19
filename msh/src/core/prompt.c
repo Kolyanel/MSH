@@ -123,6 +123,12 @@ char *sh_build_prompt(t_shell *sh)
 		return NULL;
 	}
 	
+/*	if (appendf(&buf, &len, &cap, "msh: %s: >> ", display) < 0){
+		free(short_pwd);
+		free(buf);
+		return NULL;
+	}*/
+	
 	/*if(appendf(&buf, &len, &cap, "%s%s", C_BOLD, C_YELLOW) < 0)
 		goto err;
 		
