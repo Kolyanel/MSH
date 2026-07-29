@@ -1,116 +1,99 @@
 #include "readline_internal.h"
 #include "utf8.h"
 
-
-
 /*
 ** ============================================================
-** Move cursor left by one UTF-8 character
-**
-** Cursor stores byte offset inside line buffer.
-**
+** Влево на один UTF-8 символ
 ** ============================================================
 */
 
-void rl_cursor_left(
-        t_rl *rl)
+void	rl_cursor_left(
+	t_rl *rl)
 {
-    if (!rl)
-        return;
+	const char	*start;
+	const char	*pos;
 
+	if (!rl || rl->line.cursor == 0)
+		return;
 
-    if (!rl->line.data)
-        return;
+	start = rl->line.buffer.data;
+	pos = start + rl->line.cursor;
 
+	rl->line.cursor = (size_t)(
+		utf8_prev(start, pos) - start);
 
-    if (rl->cursor == 0)
-        return;
-
-
-    rl->cursor =
-        utf8_prev(
-                rl->line.data,
-                rl->cursor);
+	rl_clear_suggestion(rl);
+	rl->dirty = 1;
 }
 
-
-
 /*
 ** ============================================================
-** Move cursor right by one UTF-8 character
-**
-** Cursor stores byte offset.
-**
+** Вправо на один UTF-8 символ
 ** ============================================================
 */
 
-void rl_cursor_right(
-        t_rl *rl)
+void	rl_cursor_right(
+	t_rl *rl)
 {
-    size_t next;
+	const char	*start;
+	const char	*pos;
+	const char	*next;
 
+	if (!rl)
+		return;
 
-    if (!rl)
-        return;
+	if (rl->line.cursor >= rl->line.buffer.len)
+		return;
 
+	start = rl->line.buffer.data;
+	pos = start + rl->line.cursor;
 
-    if (!rl->line.data)
-        return;
+	next = utf8_next(pos);
 
+	if (next <= pos)
+		return;
 
-    if (rl->cursor >= rl->line.len)
-        return;
+	if (next > start + rl->line.buffer.len)
+		next = start + rl->line.buffer.len;
 
+	rl->line.cursor = (size_t)(next - start);
 
-    next =
-        utf8_next(
-                rl->line.data,
-                rl->cursor);
-
-
-
-    if (next > rl->cursor
-        && next <= rl->line.len)
-    {
-        rl->cursor = next;
-    }
+	rl_clear_suggestion(rl);
+	rl->dirty = 1;
 }
 
-
-
 /*
 ** ============================================================
-** Move cursor to beginning
-**
+** В начало строки
 ** ============================================================
 */
 
-void rl_cursor_home(
-        t_rl *rl)
+void	rl_cursor_home(
+	t_rl *rl)
 {
-    if (!rl)
-        return;
+	if (!rl)
+		return;
 
+	rl->line.cursor = 0;
 
-    rl->cursor = 0;
+	rl_clear_suggestion(rl);
+	rl->dirty = 1;
 }
 
-
-
 /*
 ** ============================================================
-** Move cursor to end
-**
+** В конец строки
 ** ============================================================
 */
 
-void rl_cursor_end(
-        t_rl *rl)
+void	rl_cursor_end(
+	t_rl *rl)
 {
-    if (!rl)
-        return;
+	if (!rl)
+		return;
 
+	rl->line.cursor = rl->line.buffer.len;
 
-    rl->cursor =
-        rl->line.len;
+	rl_clear_suggestion(rl);
+	rl->dirty = 1;
 }

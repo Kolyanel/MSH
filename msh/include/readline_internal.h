@@ -4,446 +4,449 @@
 #include <stddef.h>
 #include <termios.h>
 
-#include "history.h"
-#include "utf8.h"
 #include "buf.h"
-
-
-
-/*
-** ============================================================
-** Defaults
-**
-** ============================================================
-*/
+#include "history.h"
 
 #define RL_DEFAULT_TERM_ROWS 24
 #define RL_DEFAULT_TERM_COLS 80
 
-
-
 /*
 ** ============================================================
 ** Keys
-**
 ** ============================================================
 */
 
 typedef enum e_rl_key
 {
-    RL_KEY_NONE = 0,
+	RL_KEY_NONE = 0,
+	RL_KEY_CHAR,
 
-    RL_KEY_CHAR,
+	RL_KEY_ENTER,
+	RL_KEY_EOF,
+	RL_KEY_INTERRUPT,
 
-    RL_KEY_ENTER,
-    RL_KEY_EOF,
+	RL_KEY_BACKSPACE,
+	RL_KEY_DELETE,
 
-    RL_KEY_BACKSPACE,
-    RL_KEY_DELETE,
+	RL_KEY_LEFT,
+	RL_KEY_RIGHT,
 
-    RL_KEY_LEFT,
-    RL_KEY_RIGHT,
+	RL_KEY_HOME,
+	RL_KEY_END,
 
-    RL_KEY_HOME,
-    RL_KEY_END,
+	RL_KEY_UP,
+	RL_KEY_DOWN,
 
-    RL_KEY_UP,
-    RL_KEY_DOWN,
+	RL_KEY_TAB
 
-    RL_KEY_TAB
-
-} t_rl_key;
-
-
+}	t_rl_key;
 
 /*
 ** ============================================================
 ** Input event
-**
 ** ============================================================
 */
 
 typedef struct s_rl_event
 {
-    t_rl_key key;
+	t_rl_key	key;
+	char		data[5];
+	size_t		len;
 
-    char data[5];
-
-    size_t len;
-
-} t_rl_event;
-
-
+}	t_rl_event;
 
 /*
 ** ============================================================
-** Render state
+** Terminal state
+** ============================================================
 **
-** Stores renderer state.
-** Coordinates are zero based.
+** All coordinates used by readline are terminal coordinates
+** relative to the readline origin.
+**
+** origin_row / origin_col:
+**     position where the editable area starts.
+**
+** cursor_row / cursor_col:
+**     current physical cursor position relative to origin.
+**
+** draw_start_* / draw_end_*:
+**     physical area occupied by the previous rendering.
+**
+** IMPORTANT:
+**
+** origin_row is NOT assumed to be zero.
+** origin_col is the visual width of the already printed
+** prompt.
+**
+** The renderer must never confuse:
+**
+**     logical cursor position
+**
+** with
+**
+**     terminal position where rendering ended.
 **
 ** ============================================================
 */
 
-typedef struct s_rl_render
+typedef struct s_rl_terminal
 {
-    /*
-    ** Start position of readline output.
-    */
-    size_t start_row;
-    size_t start_col;
+	size_t	rows;
+	size_t	cols;
 
+	/*
+	** Readline origin.
+	**
+	** These are relative to the terminal position at which
+	** readline started.
+	*/
+	size_t	origin_row;
+	size_t	origin_col;
 
+	/*
+	** Current physical cursor position relative to origin.
+	*/
+	size_t	cursor_row;
+	size_t	cursor_col;
 
-    /*
-    ** Terminal size.
-    */
-    size_t term_rows;
-    size_t term_cols;
+	/*
+	** Start of previous rendered area.
+	*/
+	size_t	draw_start_row;
+	size_t	draw_start_col;
 
+	/*
+	** End of previous rendered area.
+	**
+	** This is the position immediately after the last
+	** rendered character.
+	*/
+	size_t	draw_end_row;
+	size_t	draw_end_col;
 
+	/*
+	** Number of physical terminal rows occupied by the
+	** previous rendering.
+	*/
+	size_t	draw_rows;
 
-    /*
-    ** Previous rendered area.
-    **
-    ** rows  - number of terminal lines occupied.
-    ** width - maximum visible width occupied.
-    */
-    size_t rows;
-    size_t width;
+	int		raw_enabled;
+	int		initialized;
 
+}	t_rl_terminal;
 
+/*
+** ============================================================
+** Layout
+** ============================================================
+**
+** Layout coordinates are relative to readline origin.
+**
+** end_row/end_col:
+**     physical position immediately after the complete
+**     rendered line + suggestion.
+**
+** cursor_row/cursor_col:
+**     physical position of the logical editing cursor.
+**
+** line_cols:
+**     visual width of the editable line.
+**
+** suggestion_cols:
+**     visual width of the suggestion.
+**
+** ============================================================
+*/
 
-    /*
-    ** Cursor position relative
-    ** to readline render block.
-    */
-    size_t cursor_row;
-    size_t cursor_col;
+typedef struct s_rl_layout
+{
+	size_t	rows;
 
+	size_t	end_row;
+	size_t	end_col;
 
+	size_t	cursor_row;
+	size_t	cursor_col;
 
-    /*
-    ** End position of rendered block.
-    */
-    size_t end_row;
-    size_t end_col;
+	size_t	line_cols;
+	size_t	suggestion_cols;
 
+}	t_rl_layout;
 
+/*
+** ============================================================
+** Editable line
+** ============================================================
+*/
 
-    /*
-    ** Real terminal cursor position
-    ** after drawing.
-    */
-    size_t term_cursor_row;
-    size_t term_cursor_col;
+typedef struct s_rl_line
+{
+	t_buf	buffer;
 
+	/*
+	** UTF-8 byte offset.
+	**
+	** Always points to the beginning of a UTF-8 character
+	** or to buffer.len.
+	*/
+	size_t	cursor;
 
+}	t_rl_line;
 
-    /*
-    ** Renderer initialization state.
-    **
-    ** 0 - first render not initialized
-    ** 1 - start position already known
-    */
-    int initialized;
+/*
+** ============================================================
+** History
+** ============================================================
+*/
 
+typedef struct s_rl_history_state
+{
+	t_hist	*hist;
+	t_buf	saved_line;
+	int		active;
 
-} t_rl_render;
+}	t_rl_history_state;
 
+/*
+** ============================================================
+** Suggestion
+** ============================================================
+*/
 
+typedef struct s_rl_suggestion
+{
+	char	*text;
+
+	/*
+	** Number of bytes in suggestion.
+	*/
+	size_t	bytes;
+
+	/*
+	** Number of terminal columns occupied by suggestion.
+	*/
+	size_t	cols;
+
+}	t_rl_suggestion;
 
 /*
 ** ============================================================
 ** Readline state
-**
 ** ============================================================
 */
 
 typedef struct s_rl
 {
-    /*
-    ** Input/output descriptor.
-    */
-    int fd;
+	int					fd;
+	struct termios		old_term;
 
+	t_rl_terminal		terminal;
+	t_rl_layout			layout;
 
+	t_rl_line			line;
+	t_rl_history_state	history;
+	t_rl_suggestion		suggestion;
 
-    /*
-    ** Saved terminal attributes.
-    */
-    struct termios old_term;
+	int					running;
+	int					accepted;
+	int					dirty;
 
-
-
-    /*
-    ** Prompt.
-    */
-    char *prompt;
-
-    size_t prompt_bytes;
-    size_t prompt_cols;
-
-
-
-    /*
-    ** Editable line.
-    */
-    t_buf line;
-
-    size_t cursor;
-
-
-
-    /*
-    ** History.
-    */
-    t_hist *hist;
-
-
-
-    /*
-    ** Temporary saved line.
-    */
-    t_buf saved_line;
-
-
-
-    /*
-    ** Autosuggestion.
-    */
-    char *suggestion;
-
-    size_t suggestion_bytes;
-    size_t suggestion_cols;
-
-
-
-    /*
-    ** Renderer.
-    */
-    t_rl_render render;
-
-
-
-    /*
-    ** State flags.
-    */
-    int running;
-
-    int accepted;
-
-
-} t_rl;
-
-
+}	t_rl;
 
 /*
 ** ============================================================
 ** Lifecycle
-**
 ** ============================================================
 */
 
-int rl_init(
-        t_rl *rl,
-        int fd);
+int		rl_init(
+			t_rl *rl,
+			int fd,
+			size_t origin_row,
+			size_t origin_col);
 
+void	rl_destroy(
+			t_rl *rl);
 
-void rl_restore(
-        t_rl *rl);
+void	rl_restore(
+			t_rl *rl);
 
-
-void rl_finish_line(
-        t_rl *rl);
-
-
+int		rl_finish_line(
+			t_rl *rl);
 
 /*
 ** ============================================================
 ** Terminal
-**
 ** ============================================================
 */
 
-int rl_enable_raw(
-        t_rl *rl);
+int		rl_enable_raw(
+			t_rl *rl);
 
+int		rl_write_all(
+			int fd,
+			const char *buf,
+			size_t len);
 
-int rl_write_all(
-        int fd,
-        const char *buf,
-        size_t len);
+int		rl_get_terminal_size(
+			t_rl *rl);
 
+int		rl_move_cursor(
+			t_rl *rl,
+			size_t row,
+			size_t col);
 
-int rl_move_cursor(
-        t_rl *rl,
-        size_t row,
-        size_t col);
-
-
-void rl_clear_render(
-        t_rl *rl);
-
-
-int rl_get_terminal_size(
-        t_rl *rl);
-
-
-int rl_get_cursor_position(
-        t_rl *rl,
-        size_t *row,
-        size_t *col);
-
-
+void	rl_clear_render(
+			t_rl *rl);
 
 /*
 ** ============================================================
 ** Input
-**
 ** ============================================================
 */
 
-int rl_read_byte(
-        t_rl *rl,
-        char *c);
+int		rl_read_byte(
+			t_rl *rl,
+			char *c);
 
+int		rl_read_key(
+			t_rl *rl,
+			t_rl_event *ev);
 
-int rl_read_key(
-        t_rl *rl,
-        t_rl_event *ev);
+/*
+** ============================================================
+** Events
+** ============================================================
+*/
 
+void	rl_process_event(
+			t_rl *rl,
+			t_rl_event *ev);
 
+/*
+** ============================================================
+** Layout
+** ============================================================
+*/
+
+void	rl_calc_layout(
+			t_rl *rl);
+
+void	rl_calc_position(
+			t_rl *rl,
+			size_t byte_pos,
+			size_t *row,
+			size_t *col);
+
+size_t	rl_calc_rows(
+			t_rl *rl);
 
 /*
 ** ============================================================
 ** Rendering
-**
 ** ============================================================
 */
 
-void rl_redraw(
-        t_rl *rl);
+void	rl_redraw(
+			t_rl *rl);
 
+int		rl_render_line(
+			t_rl *rl);
 
-void rl_calc_position(
-        t_rl *rl,
-        size_t byte_pos,
-        size_t *row,
-        size_t *col);
-
-
+int		rl_render_suggestion(
+			t_rl *rl);
 
 /*
 ** ============================================================
 ** Editing
-**
 ** ============================================================
 */
 
-void rl_insert(
-        t_rl *rl,
-        const char *s,
-        size_t len);
+int		rl_insert(
+			t_rl *rl,
+			const char *s,
+			size_t len);
 
+int		rl_delete_range(
+			t_rl *rl,
+			size_t start,
+			size_t end);
 
-void rl_backspace(
-        t_rl *rl);
+void	rl_backspace(
+			t_rl *rl);
 
+void	rl_delete(
+			t_rl *rl);
 
-void rl_delete(
-        t_rl *rl);
+void	rl_cursor_left(
+			t_rl *rl);
 
+void	rl_cursor_right(
+			t_rl *rl);
 
-void rl_cursor_left(
-        t_rl *rl);
+void	rl_cursor_home(
+			t_rl *rl);
 
-
-void rl_cursor_right(
-        t_rl *rl);
-
-
-void rl_cursor_home(
-        t_rl *rl);
-
-
-void rl_cursor_end(
-        t_rl *rl);
-
-
+void	rl_cursor_end(
+			t_rl *rl);
 
 /*
 ** ============================================================
 ** History
-**
 ** ============================================================
 */
 
-void rl_history_up(
-        t_rl *rl);
+void	rl_history_up(
+			t_rl *rl);
 
+void	rl_history_down(
+			t_rl *rl);
 
-void rl_history_down(
-        t_rl *rl);
+void	rl_replace_line(
+			t_rl *rl,
+			const char *s);
 
+void	rl_save_current_line(
+			t_rl *rl);
 
-void rl_replace_line(
-        t_rl *rl,
-        const char *s);
-
-
-void rl_save_current_line(
-        t_rl *rl);
-
-
-void rl_free_saved_line(
-        t_rl *rl);
-
-
+void	rl_free_saved_line(
+			t_rl *rl);
 
 /*
 ** ============================================================
 ** Suggestion
-**
 ** ============================================================
 */
 
-void rl_suggest(
-        t_rl *rl);
+void	rl_suggest(
+			t_rl *rl);
 
+void	rl_clear_suggestion(
+			t_rl *rl);
 
-void rl_clear_suggestion(
-        t_rl *rl);
-
-
-void rl_accept_suggestion(
-        t_rl *rl);
-
-
+void	rl_accept_suggestion(
+			t_rl *rl);
 
 /*
 ** ============================================================
 ** Completion
-**
 ** ============================================================
 */
 
-void rl_complete(
-        t_rl *rl);
-
-
+void	rl_complete(
+			t_rl *rl);
 
 /*
 ** ============================================================
-** Event processing
-**
+** Public readline
 ** ============================================================
 */
 
-void rl_process_event(
-        t_rl *rl,
-        t_rl_event *ev);
-
-
+char	*readline_fd(
+			int fd,
+			const char *prompt,
+			t_hist *hist,
+			size_t origin_row,
+			size_t origin_col);
 
 #endif

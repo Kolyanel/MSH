@@ -9,43 +9,43 @@
 
 typedef struct s_hist
 {
-    char    *lines[HIST_MAX];
+	char	*lines[HIST_MAX];
 
-    size_t  size;
+	size_t	size;
 
-    size_t  head;
+	size_t	head;
 
-    size_t  index;
+	size_t	index;
 
-} t_hist;
-
-
-
-int hist_init(
-        t_hist *hist);
+}	t_hist;
 
 
 
-void hist_free(
-        t_hist *hist);
+int	hist_init(
+		t_hist *hist);
 
 
 
-int hist_push(
-        t_hist *hist,
-        const char *str);
+void	hist_free(
+		t_hist *hist);
 
 
 
-int hist_save(
-        t_hist *hist,
-        const char *filename);
+int	hist_push(
+		t_hist *hist,
+		const char *str);
 
 
 
-int hist_load(
-        t_hist *hist,
-        const char *filename);
+int	hist_save(
+		t_hist *hist,
+		const char *filename);
+
+
+
+int	hist_load(
+		t_hist *hist,
+		const char *filename);
 
 
 

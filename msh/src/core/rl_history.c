@@ -1,264 +1,254 @@
 #include <string.h>
 
 #include "readline_internal.h"
+#include "utf8.h"
 
 
-/*
-** ============================================================
-** Replace current line
-**
-** Replace editable buffer content.
-**
-** Cursor is stored as byte offset.
-**
-** ============================================================
-*/
-
-void rl_replace_line(
-        t_rl *rl,
-        const char *s)
+void	rl_replace_line(
+		t_rl *rl,
+		const char *s)
 {
-    size_t len;
+	size_t	len;
 
 
-    if (!rl)
-        return;
+	if (!rl)
+		return;
 
 
-    if (!s)
-        s = "";
+	if (!s)
+		s = "";
 
 
-    len = strlen(s);
+	len = strlen(s);
 
 
+	rl->line.buffer.len = 0;
 
-    rl->line.len = 0;
-
-
-    if (rl->line.data)
-        rl->line.data[0] = '\0';
+	if (rl->line.buffer.data)
+		rl->line.buffer.data[0] = '\0';
 
 
-
-    if (buf_append_span(
-            &rl->line,
-            s,
-            len) < 0)
-    {
-        return;
-    }
-
-
-
-    rl->cursor = len;
+	if (buf_append_span(
+			&rl->line.buffer,
+			s,
+			len) < 0)
+	{
+		rl->line.cursor = 0;
+		rl_clear_suggestion(rl);
+		rl->dirty = 1;
+		return;
+	}
 
 
-    rl_clear_suggestion(rl);
+	if (rl->line.buffer.data)
+		rl->line.buffer.data[rl->line.buffer.len] = '\0';
+
+
+	rl->line.cursor =
+		rl->line.buffer.len;
+
+
+	if (rl->line.buffer.data)
+	{
+		rl->line.cursor =
+			utf8_align_boundary(
+				rl->line.buffer.data,
+				rl->line.cursor);
+	}
+
+
+	rl_clear_suggestion(rl);
+
+	rl->dirty = 1;
 }
 
 
 
-/*
-** ============================================================
-** Save current line
-**
-** Save user input before entering history.
-**
-** ============================================================
-*/
-
-void rl_save_current_line(
-        t_rl *rl)
+void	rl_save_current_line(
+		t_rl *rl)
 {
-    if (!rl)
-        return;
+	if (!rl)
+		return;
 
 
-
-    rl->saved_line.len = 0;
-
-
-    if (rl->saved_line.data)
-        rl->saved_line.data[0] = '\0';
+	rl->history.saved_line.len = 0;
 
 
-
-    if (!rl->line.data)
-        return;
-
+	if (rl->history.saved_line.data)
+		rl->history.saved_line.data[0] = '\0';
 
 
-    if (buf_append_span(
-            &rl->saved_line,
-            rl->line.data,
-            rl->line.len) < 0)
-    {
-        rl->saved_line.len = 0;
+	if (!rl->line.buffer.data)
+		return;
 
-        if (rl->saved_line.data)
-            rl->saved_line.data[0] = '\0';
-    }
+
+	if (buf_append_span(
+			&rl->history.saved_line,
+			rl->line.buffer.data,
+			rl->line.buffer.len) < 0)
+	{
+		rl->history.saved_line.len = 0;
+
+		if (rl->history.saved_line.data)
+			rl->history.saved_line.data[0] = '\0';
+
+		return;
+	}
+
+
+	if (rl->history.saved_line.data)
+		rl->history.saved_line.data[
+			rl->history.saved_line.len] = '\0';
 }
 
 
 
-/*
-** ============================================================
-** Free saved line
-**
-** Release temporary history buffer.
-**
-** ============================================================
-*/
-
-void rl_free_saved_line(
-        t_rl *rl)
+void	rl_free_saved_line(
+		t_rl *rl)
 {
-    if (!rl)
-        return;
+	if (!rl)
+		return;
 
 
-    buf_free(
-            &rl->saved_line);
+	rl->history.saved_line.len = 0;
 
 
-    buf_init(
-            &rl->saved_line);
+	if (rl->history.saved_line.data)
+		rl->history.saved_line.data[0] = '\0';
 }
 
 
 
-/*
-** ============================================================
-** History UP
-**
-** Move to older command.
-**
-** ============================================================
-*/
-
-void rl_history_up(
-        t_rl *rl)
+void	rl_history_up(
+		t_rl *rl)
 {
-    t_hist *h;
+	t_hist	*h;
+	size_t	next;
 
 
-    if (!rl || !rl->hist)
-        return;
+	if (!rl)
+		return;
 
 
-    h = rl->hist;
+	h = rl->history.hist;
 
 
-
-    if (h->size == 0)
-        return;
-
+	if (!h)
+		return;
 
 
-    /*
-    ** First history movement.
-    */
-
-    if (h->index == h->head)
-        rl_save_current_line(rl);
+	if (h->size == 0)
+		return;
 
 
+	if (h->head >= HIST_MAX)
+		h->head = 0;
 
-    /*
-    ** Move backward.
-    */
 
-    if (h->index == 0)
-        h->index = HIST_MAX - 1;
-    else
-        h->index--;
+	if (h->index >= HIST_MAX)
+		h->index = h->head;
 
 
 
-    if (!h->lines[h->index])
-        return;
+	if (h->index == h->head)
+		rl_save_current_line(rl);
 
 
 
-    rl_replace_line(
-            rl,
-            h->lines[h->index]);
+	next = h->index;
+
+
+	if (next == 0)
+		next = HIST_MAX - 1;
+	else
+		next--;
+
+
+
+	while (!h->lines[next])
+	{
+		if (next == 0)
+			next = HIST_MAX - 1;
+		else
+			next--;
+
+
+		if (next == h->index)
+			return;
+	}
+
+
+
+	h->index = next;
+
+
+	rl_replace_line(
+		rl,
+		h->lines[next]);
 }
 
 
 
-/*
-** ============================================================
-** History DOWN
-**
-** Move to newer command.
-**
-** ============================================================
-*/
-
-void rl_history_down(
-        t_rl *rl)
+void	rl_history_down(
+		t_rl *rl)
 {
-    t_hist *h;
+	t_hist	*h;
 
 
-    if (!rl || !rl->hist)
-        return;
+	if (!rl)
+		return;
 
 
-    h = rl->hist;
+	h = rl->history.hist;
 
 
-
-    if (h->size == 0)
-        return;
-
+	if (!h)
+		return;
 
 
-    /*
-    ** Already at newest position.
-    */
-
-    if (h->index == h->head)
-        return;
+	if (h->size == 0)
+		return;
 
 
+	if (h->head >= HIST_MAX)
+		h->head = 0;
 
-    h->index++;
 
-
-
-    if (h->index >= HIST_MAX)
-        h->index = 0;
+	if (h->index >= HIST_MAX)
+		h->index = h->head;
 
 
 
-    /*
-    ** Returned after newest command.
-    */
+	if (h->index != h->head)
+	{
+		h->index++;
 
-    if (h->index == h->head)
-    {
-        rl_replace_line(
-                rl,
-                rl->saved_line.data
-                    ? rl->saved_line.data
-                    : "");
-
-
-        rl_free_saved_line(rl);
-
-        return;
-    }
+		if (h->index >= HIST_MAX)
+			h->index = 0;
+	}
 
 
 
-    if (h->lines[h->index])
-    {
-        rl_replace_line(
-                rl,
-                h->lines[h->index]);
-    }
+	if (h->index == h->head)
+	{
+		rl_replace_line(
+			rl,
+			rl->history.saved_line.data
+				? rl->history.saved_line.data
+				: "");
+
+
+		rl_free_saved_line(rl);
+
+		return;
+	}
+
+
+
+	if (h->lines[h->index])
+	{
+		rl_replace_line(
+			rl,
+			h->lines[h->index]);
+	}
 }

@@ -1,68 +1,63 @@
-#include <unistd.h>
-
 #include "readline_internal.h"
-
 
 /*
 ** ============================================================
-** Finish current input line
-**
-** Cursor is already stored by last redraw.
-**
+** Finish accepted line
 ** ============================================================
 */
 
-void rl_finish_line(
-        t_rl *rl)
+int	rl_finish_line(
+		t_rl *rl)
 {
-    static const char nl[] = "\r\n";
+	size_t	end_row;
+	size_t	end_col;
 
+	if (!rl || rl->fd < 0)
+		return (-1);
 
-    if (!rl)
-        return;
+	/*
+	** Suggestion is visual-only and must never become part
+	** of the accepted command.
+	*/
+	rl_clear_suggestion(rl);
 
+	/*
+	** Recalculate the final position after suggestion removal.
+	*/
+	rl_calc_layout(rl);
 
-    /*
-    ** Move cursor to current logical cursor position.
-    */
+	end_row = rl->layout.end_row;
+	end_col = rl->layout.end_col;
 
-    rl_move_cursor(
-            rl,
-            rl->render.start_row
-                + rl->render.cursor_row,
-            rl->render.start_col
-                + rl->render.cursor_col);
+	/*
+	** Move to the actual end of the accepted input.
+	*/
+	if (rl_move_cursor(
+			rl,
+			end_row,
+			end_col) < 0)
+		return (-1);
 
+	/*
+	** Always terminate the accepted readline line explicitly.
+	**
+	** CR returns to column zero.
+	** LF advances to the next physical row.
+	*/
+	if (rl_write_all(
+			rl->fd,
+			"\r\n",
+			2) < 0)
+		return (-1);
 
+	rl->terminal.draw_rows = 0;
 
-    /*
-    ** Finish line.
-    */
+	rl->terminal.cursor_row =
+		end_row + 1;
 
-    rl_write_all(
-            rl->fd,
-            nl,
-            sizeof(nl) - 1);
+	rl->terminal.cursor_col = 0;
 
+	rl->terminal.initialized = 0;
 
-
-    /*
-    ** Invalidate render cache.
-    */
-
-    rl->render.rows = 0;
-    rl->render.width = 0;
-
-    rl->render.cursor_row = 0;
-    rl->render.cursor_col = 0;
-
-    rl->render.end_row = 0;
-    rl->render.end_col = 0;
-
-    rl->render.term_cursor_row = 0;
-    rl->render.term_cursor_col = 0;
-
-
-    rl->accepted = 1;
-    rl->running = 0;
+	return (0);
 }

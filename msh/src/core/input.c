@@ -3,361 +3,354 @@
 #include <unistd.h>
 
 #include "readline_internal.h"
-
+#include "utf8.h"
 
 /*
 ** ============================================================
-** Read one byte from terminal
+** Прочитать один байт
 ** ============================================================
 */
 
-int rl_read_byte(
-        t_rl *rl,
-        char *c)
+int	rl_read_byte(
+	t_rl *rl,
+	char *c)
 {
-    ssize_t ret;
+	ssize_t	ret;
 
+	if (!rl || !c)
+	{
+		errno = EINVAL;
+		return (-1);
+	}
 
-    if (!rl || rl->fd < 0 || !c)
-    {
-        errno = EINVAL;
-        return (-1);
-    }
+	while (1)
+	{
+		ret = read(
+			rl->fd,
+			c,
+			1);
 
+		if (ret < 0)
+		{
+			if (errno == EINTR)
+				continue;
 
-    while (1)
-    {
-        ret = read(
-                rl->fd,
-                c,
-                1);
+			return (-1);
+		}
 
+		if (ret == 0)
+			return (0);
 
-        if (ret < 0)
-        {
-            if (errno == EINTR)
-                continue;
-
-            return (-1);
-        }
-
-
-        if (ret == 0)
-            return (0);
-
-
-        return (1);
-    }
+		return (1);
+	}
 }
 
-
-
 /*
 ** ============================================================
-** Read escape sequence
+** Прочитать CSI-последовательность
+** ============================================================
 **
-** ESC [ A etc.
+** Поддерживаются:
 **
-** Internal helper.
+**     ESC [ A
+**     ESC [ B
+**     ESC [ C
+**     ESC [ D
+**     ESC [ H
+**     ESC [ F
 **
+** и формы:
+**
+**     ESC [ 1 ~
+**     ESC [ 3 ~
+**     ESC [ 4 ~
+**     ESC [ 7 ~
+**     ESC [ 8 ~
+**
+** Параметры намеренно читаются полностью.
 ** ============================================================
 */
 
-static int rl_read_escape(
-        t_rl *rl,
-        char *seq,
-        size_t size)
+static int	rl_read_escape(
+	t_rl *rl,
+	t_rl_event *ev)
 {
-    size_t i;
-    char c;
+	char	c;
+	char	params[16];
+	size_t	len;
 
+	if (!rl || !ev)
+		return (-1);
 
-    if (!rl || rl->fd < 0 || !seq || size < 2)
-    {
-        errno = EINVAL;
-        return (-1);
-    }
+	if (rl_read_byte(
+			rl,
+			&c) <= 0)
+		return (-1);
 
+	/*
+	** После ESC должен идти '['.
+	*/
+	if (c != '[')
+	{
+		ev->key = RL_KEY_NONE;
+		return (0);
+	}
 
-    i = 0;
+	len = 0;
 
+	while (len < sizeof(params) - 1)
+	{
+		if (rl_read_byte(
+				rl,
+				&c) <= 0)
+			return (-1);
 
-    while (i < size - 1)
-    {
-        if (rl_read_byte(
-                rl,
-                &c) <= 0)
-        {
-            return (-1);
-        }
+		/*
+		** Конечный символ CSI.
+		*/
+		if ((unsigned char)c >= 0x40
+			&& (unsigned char)c <= 0x7E)
+		{
+			params[len] = '\0';
 
+			switch (c)
+			{
+				case 'A':
+					ev->key = RL_KEY_UP;
+					return (0);
 
-        seq[i++] = c;
+				case 'B':
+					ev->key = RL_KEY_DOWN;
+					return (0);
 
+				case 'C':
+					ev->key = RL_KEY_RIGHT;
+					return (0);
 
-        /*
-        ** CSI sequences finish
-        ** with a letter.
-        */
+				case 'D':
+					ev->key = RL_KEY_LEFT;
+					return (0);
 
-        if ((c >= 'A' && c <= 'Z')
-            || (c >= 'a' && c <= 'z'))
-        {
-            break;
-        }
-    }
+				case 'H':
+					ev->key = RL_KEY_HOME;
+					return (0);
 
+				case 'F':
+					ev->key = RL_KEY_END;
+					return (0);
 
-    seq[i] = '\0';
+				case '~':
+					if (strcmp(params, "1") == 0
+						|| strcmp(params, "7") == 0)
+						ev->key = RL_KEY_HOME;
+					else if (strcmp(params, "3") == 0)
+						ev->key = RL_KEY_DELETE;
+					else if (strcmp(params, "4") == 0
+						|| strcmp(params, "8") == 0)
+						ev->key = RL_KEY_END;
+					else
+						ev->key = RL_KEY_NONE;
 
+					return (0);
 
-    return ((int)i);
+				default:
+					ev->key = RL_KEY_NONE;
+					return (0);
+			}
+		}
+
+		params[len++] = c;
+	}
+
+	ev->key = RL_KEY_NONE;
+	return (0);
 }
 
-
-
 /*
 ** ============================================================
-** Decode escape sequence
+** Прочитать UTF-8 символ
+** ============================================================
+**
+** Сначала определяем ожидаемую длину по первому байту.
+** После чтения проверяем всю последовательность через
+** utf8_decode().
+**
+** Некорректный UTF-8 не принимается как многобайтный символ.
+** Первый байт возвращается как обычный байт.
 ** ============================================================
 */
 
-static void rl_decode_escape(
-        const char *seq,
-        t_rl_event *ev)
+static int	rl_read_utf8(
+	t_rl *rl,
+	t_rl_event *ev,
+	char first)
 {
-    if (!seq || !ev)
-        return;
+	unsigned char	c;
+	size_t			need;
+	size_t			i;
+	t_utf8_char		ch;
 
+	if (!rl || !ev)
+		return (-1);
 
-    ev->key = RL_KEY_NONE;
+	memset(
+		ev,
+		0,
+		sizeof(*ev));
 
+	ev->key = RL_KEY_CHAR;
+	ev->data[0] = first;
 
-    if (strcmp(seq, "[A") == 0)
-        ev->key = RL_KEY_UP;
+	c = (unsigned char)first;
 
-    else if (strcmp(seq, "[B") == 0)
-        ev->key = RL_KEY_DOWN;
+	if (c < 0x80)
+		need = 1;
+	else if ((c & 0xE0) == 0xC0)
+		need = 2;
+	else if ((c & 0xF0) == 0xE0)
+		need = 3;
+	else if ((c & 0xF8) == 0xF0)
+		need = 4;
+	else
+		need = 1;
 
-    else if (strcmp(seq, "[C") == 0)
-        ev->key = RL_KEY_RIGHT;
+	i = 1;
 
-    else if (strcmp(seq, "[D") == 0)
-        ev->key = RL_KEY_LEFT;
+	while (i < need)
+	{
+		if (rl_read_byte(
+				rl,
+				&ev->data[i]) <= 0)
+			return (-1);
 
+		i++;
+	}
 
-    else if (strcmp(seq, "[H") == 0
-        || strcmp(seq, "[1~") == 0)
-        ev->key = RL_KEY_HOME;
+	/*
+	** Проверяем полученную последовательность.
+	*/
+	if (utf8_decode(
+			ev->data,
+			need,
+			&ch) < 0
+		|| ch.bytes != need)
+	{
+		/*
+		** Первый байт считаем отдельным байтом.
+		*/
+		ev->data[0] = first;
+		ev->len = 1;
+		return (0);
+	}
 
-
-    else if (strcmp(seq, "[F") == 0
-        || strcmp(seq, "[4~") == 0)
-        ev->key = RL_KEY_END;
-
-
-    else if (strcmp(seq, "[3~") == 0)
-        ev->key = RL_KEY_DELETE;
+	ev->len = need;
+	return (0);
 }
 
-
-
 /*
 ** ============================================================
-** Read UTF-8 character
-**
-** First byte already received.
-**
+** Основной обработчик клавиши
 ** ============================================================
 */
 
-static int rl_read_char(
-        t_rl *rl,
-        char first,
-        t_rl_event *ev)
+int	rl_read_key(
+	t_rl *rl,
+	t_rl_event *ev)
 {
-    size_t need;
-    size_t len;
-    char c;
-
-
-    if (!rl || !ev)
-        return (-1);
-
-
-    need = utf8_char_len(
-            (unsigned char)first);
-
-
-    if (need >= sizeof(ev->data))
-        need = sizeof(ev->data) - 1;
-
-
-    ev->data[0] = first;
-
-    len = 1;
-
-
-    while (len < need)
-    {
-        if (rl_read_byte(
-                rl,
-                &c) <= 0)
-        {
-            return (-1);
-        }
-
-
-        ev->data[len++] = c;
-    }
-
-
-    ev->data[len] = '\0';
-
-    ev->len = len;
-
-
-    return (0);
-}
-
-
-
-/*
-** ============================================================
-** Read key event
-** ============================================================
-*/
-
-int rl_read_key(
-        t_rl *rl,
-        t_rl_event *ev)
-{
-    char c;
-
-
-    if (!rl || rl->fd < 0 || !ev)
-    {
-        errno = EINVAL;
-        return (-1);
-    }
-
-
-    memset(
-            ev,
-            0,
-            sizeof(*ev));
-
-
-
-    if (rl_read_byte(
-            rl,
-            &c) <= 0)
-    {
-        ev->key = RL_KEY_EOF;
-        return (0);
-    }
-
-
-
-    /*
-    ** Escape sequence.
-    */
-
-    if ((unsigned char)c == 27)
-    {
-        char seq[16];
-
-
-        memset(
-                seq,
-                0,
-                sizeof(seq));
-
-
-        if (rl_read_escape(
-                rl,
-                seq,
-                sizeof(seq)) < 0)
-        {
-            return (-1);
-        }
-
-
-        rl_decode_escape(
-                seq,
-                ev);
-
-
-        return (0);
-    }
-
-
-
-    /*
-    ** Enter.
-    */
-
-    if (c == '\n' || c == '\r')
-    {
-        ev->key = RL_KEY_ENTER;
-        return (0);
-    }
-
-
-
-    /*
-    ** Ctrl-D.
-    */
-
-    if ((unsigned char)c == 4)
-    {
-        ev->key = RL_KEY_EOF;
-        return (0);
-    }
-
-
-
-    /*
-    ** Backspace.
-    */
-
-    if ((unsigned char)c == 127
-        || (unsigned char)c == 8)
-    {
-        ev->key = RL_KEY_BACKSPACE;
-        return (0);
-    }
-
-
-
-    /*
-    ** Tab.
-    */
-
-    if (c == '\t')
-    {
-        ev->key = RL_KEY_TAB;
-        return (0);
-    }
-
-
-
-    /*
-    ** UTF-8 character.
-    */
-
-    ev->key = RL_KEY_CHAR;
-
-
-    if (rl_read_char(
-            rl,
-            c,
-            ev) < 0)
-    {
-        ev->key = RL_KEY_NONE;
-        return (-1);
-    }
-
-
-    return (0);
+	char	c;
+	int		ret;
+
+	if (!rl || !ev)
+	{
+		errno = EINVAL;
+		return (-1);
+	}
+
+	memset(
+		ev,
+		0,
+		sizeof(*ev));
+
+	ret = rl_read_byte(
+		rl,
+		&c);
+
+	if (ret == 0)
+	{
+		ev->key = RL_KEY_EOF;
+		return (0);
+	}
+
+	if (ret < 0)
+		return (-1);
+
+	/*
+	** ESC.
+	*/
+	if ((unsigned char)c == 0x1B)
+		return (rl_read_escape(rl, ev));
+
+	/*
+	** Enter.
+	*/
+	if (c == '\n' || c == '\r')
+	{
+		ev->key = RL_KEY_ENTER;
+		ev->len = 1;
+		ev->data[0] = c;
+		return (0);
+	}
+
+	/*
+	** Backspace.
+	*/
+	if ((unsigned char)c == 127
+		|| (unsigned char)c == 8)
+	{
+		ev->key = RL_KEY_BACKSPACE;
+		ev->len = 1;
+		ev->data[0] = c;
+		return (0);
+	}
+
+	/*
+	** Ctrl-D.
+	*/
+	if ((unsigned char)c == 4)
+	{
+		ev->key = RL_KEY_EOF;
+		ev->len = 1;
+		ev->data[0] = c;
+		return (0);
+	}
+
+	/*
+	** Ctrl-C.
+	*/
+	if ((unsigned char)c == 3)
+	{
+		ev->key = RL_KEY_INTERRUPT;
+		ev->len = 1;
+		ev->data[0] = c;
+		return (0);
+	}
+
+	/*
+	** Tab.
+	*/
+	if (c == '\t')
+	{
+		ev->key = RL_KEY_TAB;
+		ev->len = 1;
+		ev->data[0] = c;
+		return (0);
+	}
+
+	/*
+	** Обычный символ / UTF-8.
+	*/
+	return (rl_read_utf8(
+		rl,
+		ev,
+		c));
 }

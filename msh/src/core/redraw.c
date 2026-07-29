@@ -1,356 +1,348 @@
-#include <string.h>
+#include <errno.h>
+#include <stdio.h>
 
 #include "readline_internal.h"
-#include "utf8.h"
-
 
 /*
 ** ============================================================
-** Calculate position inside readline render block
+** Restore logical cursor
+** ============================================================
 **
-** byte_pos:
-**      byte offset inside editable line.
+** Rendering always finishes at:
 **
-** Returns relative coordinates:
+**     layout.end_row
+**     layout.end_col
 **
-** row / col inside readline block.
+** but editing may be located anywhere inside the rendered
+** buffer.
 **
+** Therefore we move from render end to logical cursor.
+**
+** All layout coordinates are relative to readline origin.
 ** ============================================================
 */
 
-void rl_calc_position(
-        t_rl *rl,
-        size_t byte_pos,
-        size_t *row,
-        size_t *col)
+static int	rl_restore_cursor(
+		t_rl *rl)
 {
-    size_t pos;
-    size_t cols;
-    size_t next;
-    int width;
+	char	buf[64];
+	int		len;
+	size_t	target_col;
 
+	if (!rl)
+	{
+		errno = EINVAL;
+		return (-1);
+	}
 
-    if (!rl || !row || !col)
-        return;
+	/*
+	** Rendering finishes at layout.end_*.
+	** Move vertically back to the logical cursor row.
+	*/
+	if (rl->layout.end_row > rl->layout.cursor_row)
+	{
+		len = snprintf(
+			buf,
+			sizeof(buf),
+			"\033[%zuA",
+			rl->layout.end_row
+				- rl->layout.cursor_row);
 
+		if (len < 0 || (size_t)len >= sizeof(buf))
+		{
+			errno = EOVERFLOW;
+			return (-1);
+		}
 
-    *row = 0;
-    *col = 0;
+		if (rl_write_all(
+				rl->fd,
+				buf,
+				(size_t)len) < 0)
+			return (-1);
+	}
 
+	/*
+	** Physical column depends on the row.
+	**
+	** First readline row:
+	**
+	**     physical column = origin_col + cursor_col
+	**
+	** Subsequent rows:
+	**
+	**     physical column = cursor_col
+	*/
+	if (rl->layout.cursor_row == 0)
+		target_col =
+			rl->terminal.origin_col
+			+ rl->layout.cursor_col;
+	else
+		target_col =
+			rl->layout.cursor_col;
 
-    cols = rl->render.term_cols;
+	/*
+	** Return to physical column zero before positioning.
+	*/
+	if (rl_write_all(
+			rl->fd,
+			"\r",
+			1) < 0)
+		return (-1);
 
-    if (cols == 0)
-        cols = RL_DEFAULT_TERM_COLS;
+	if (target_col != 0)
+	{
+		len = snprintf(
+			buf,
+			sizeof(buf),
+			"\033[%zuC",
+			target_col);
 
+		if (len < 0 || (size_t)len >= sizeof(buf))
+		{
+			errno = EOVERFLOW;
+			return (-1);
+		}
 
+		if (rl_write_all(
+				rl->fd,
+				buf,
+				(size_t)len) < 0)
+			return (-1);
+	}
 
-    /*
-    ** Prompt occupies first columns.
-    */
+	/*
+	** Store logical readline-relative cursor position.
+	*/
+	rl->terminal.cursor_row =
+		rl->layout.cursor_row;
 
-    *col = rl->prompt_cols;
+	rl->terminal.cursor_col =
+		rl->layout.cursor_col;
 
-
-    while (*col >= cols)
-    {
-        (*row)++;
-        *col -= cols;
-    }
-
-
-
-    pos = 0;
-
-
-    while (rl->line.data
-        && pos < byte_pos)
-    {
-        width =
-            utf8_char_width(
-                    rl->line.data + pos);
-
-
-        if (width <= 0)
-            width = 1;
-
-
-
-        if (*col + (size_t)width > cols)
-        {
-            (*row)++;
-            *col = 0;
-        }
-
-
-
-        *col += (size_t)width;
-
-
-
-        next =
-            utf8_next(
-                    rl->line.data,
-                    pos);
-
-
-        if (next <= pos)
-            pos++;
-        else
-            pos = next;
-    }
-
-
-
-    if (*col >= cols)
-    {
-        (*row)++;
-        *col = 0;
-    }
+	return (0);
 }
 
-
-
 /*
 ** ============================================================
-** Calculate rendered block size
-**
+** Save render bounds
 ** ============================================================
 */
 
-static void rl_calc_render_size(
-        t_rl *rl,
-        size_t *rows,
-        size_t *width)
+static void	rl_save_render_bounds(
+		t_rl *rl,
+		size_t rows)
 {
-    size_t row;
-    size_t col;
-    size_t cols;
+	if (!rl)
+		return;
 
+	/*
+	** Rendering starts at readline-relative (0, 0).
+	**
+	** origin_col is the physical terminal column occupied by
+	** the already printed prompt. It is NOT part of the
+	** relative draw coordinate system.
+	*/
+	rl->terminal.draw_start_row = 0;
+	rl->terminal.draw_start_col = 0;
 
-    if (!rl || !rows || !width)
-        return;
+	/*
+	** Rendering ends where layout says the complete line +
+	** suggestion ended.
+	**
+	** These coordinates are relative to readline origin.
+	*/
+	rl->terminal.draw_end_row =
+		rl->layout.end_row;
 
+	rl->terminal.draw_end_col =
+		rl->layout.end_col;
 
-    cols = rl->render.term_cols;
-
-    if (cols == 0)
-        cols = RL_DEFAULT_TERM_COLS;
-
-
-
-    rl_calc_position(
-            rl,
-            rl->line.len,
-            &row,
-            &col);
-
-
-
-    if (rl->suggestion)
-    {
-        col += rl->suggestion_cols;
-
-
-        while (col >= cols)
-        {
-            row++;
-            col -= cols;
-        }
-    }
-
-
-
-    *rows = row + 1;
-    *width = col;
+	rl->terminal.draw_rows = rows;
 }
 
-
-
 /*
 ** ============================================================
-** Redraw readline block
+** Establish readline origin
+** ============================================================
+**
+** The caller has already printed the prompt.
+**
+** After rl_clear_render(), the physical terminal cursor is
+** positioned at the beginning of the readline input area.
+**
+** The tracked cursor state must therefore also become:
+**
+**     row = 0
+**     col = 0
+**
+** This is the important invariant:
+**
+**     terminal.cursor_* == physical cursor relative to
+**     readline origin.
 **
 ** ============================================================
 */
 
-void rl_redraw(
-        t_rl *rl)
+static int	rl_position_at_origin(
+		t_rl *rl)
 {
-    size_t rows;
-    size_t width;
+	if (!rl)
+	{
+		errno = EINVAL;
+		return (-1);
+	}
 
-    size_t cursor_row;
-    size_t cursor_col;
+	/*
+	** On the first redraw there is no previous render, so the
+	** physical cursor is still immediately after the prompt.
+	**
+	** We explicitly establish that position.
+	*/
+	if (rl_write_all(
+			rl->fd,
+			"\r",
+			1) < 0)
+		return (-1);
 
+	if (rl->terminal.origin_col != 0)
+	{
+		char	buf[32];
+		int		len;
 
-    if (!rl)
-        return;
+		len = snprintf(
+			buf,
+			sizeof(buf),
+			"\033[%zuC",
+			rl->terminal.origin_col);
 
+		if (len < 0 || (size_t)len >= sizeof(buf))
+		{
+			errno = EOVERFLOW;
+			return (-1);
+		}
 
-    if (!rl->render.initialized)
-        return;
+		if (rl_write_all(
+				rl->fd,
+				buf,
+				(size_t)len) < 0)
+			return (-1);
+	}
 
+	/*
+	** Physical cursor is now at readline-relative (0, 0).
+	*/
+	rl->terminal.cursor_row = 0;
+	rl->terminal.cursor_col = 0;
 
+	return (0);
+}
 
-    /*
-    ** Remove previous render.
-    */
+/*
+** ============================================================
+** Full redraw
+** ============================================================
+*/
 
-    if (rl->render.rows)
-    {
-        rl_clear_render(rl);
-    }
+void	rl_redraw(
+		t_rl *rl)
+{
+	size_t	rows;
 
+	if (!rl || rl->fd < 0)
+		return;
 
+	/*
+	** Refresh terminal geometry.
+	*/
+	if (rl_get_terminal_size(rl) < 0)
+	{
+		if (rl->terminal.cols == 0)
+			rl->terminal.cols =
+				RL_DEFAULT_TERM_COLS;
 
-    /*
-    ** Update terminal dimensions.
-    */
+		if (rl->terminal.rows == 0)
+			rl->terminal.rows =
+				RL_DEFAULT_TERM_ROWS;
+	}
 
-    rl_get_terminal_size(rl);
+	/*
+	** Remove the complete previous rendering.
+	**
+	** After this call:
+	**
+	**     physical cursor = readline origin
+	**     cursor_row      = 0
+	**     cursor_col      = 0
+	**     draw_rows       = 0
+	*/
+	if (rl->terminal.draw_rows != 0)
+		rl_clear_render(rl);
 
+	/*
+	** Establish the physical readline origin.
+	**
+	** This is required only as a physical positioning operation.
+	** The helper also synchronizes terminal.cursor_*.
+	*/
+	if (rl_position_at_origin(rl) < 0)
+		return;
 
+	/*
+	** Calculate the complete layout before writing anything.
+	**
+	** All layout coordinates are relative to readline origin.
+	*/
+	rl_calc_layout(rl);
 
-    /*
-    ** Move to readline block start.
-    */
+	/*
+	** Render the editable buffer.
+	*/
+	if (rl_render_line(rl) < 0)
+		return;
 
-    rl_move_cursor(
-            rl,
-            rl->render.start_row,
-            rl->render.start_col);
+	/*
+	** Render suggestion immediately after the editable buffer.
+	**
+	** Suggestion is display-only.
+	** It never changes line.cursor.
+	*/
+	if (rl_render_suggestion(rl) < 0)
+		return;
 
+	/*
+	** Calculate physical rows occupied by:
+	**
+	**     line + suggestion
+	*/
+	rows = rl_calc_rows(rl);
 
+	if (rows == 0)
+		rows = 1;
 
-    /*
-    ** Draw prompt.
-    */
+	/*
+	** Store the exact bounds of this render.
+	*/
+	rl_save_render_bounds(
+		rl,
+		rows);
 
-    if (rl->prompt
-        && rl->prompt_bytes)
-    {
-        rl_write_all(
-                rl->fd,
-                rl->prompt,
-                rl->prompt_bytes);
-    }
+	/*
+	** Rendering currently ends at layout.end_*.
+	**
+	** Restore the actual logical editing cursor.
+	*/
+	if (rl_restore_cursor(rl) < 0)
+		return;
 
+	/*
+	** Synchronize tracked cursor state.
+	*/
+	rl->terminal.cursor_row =
+		rl->layout.cursor_row;
 
+	rl->terminal.cursor_col =
+		rl->layout.cursor_col;
 
-    /*
-    ** Draw editable line.
-    */
-
-    if (rl->line.data
-        && rl->line.len)
-    {
-        rl_write_all(
-                rl->fd,
-                rl->line.data,
-                rl->line.len);
-    }
-
-
-
-    /*
-    ** Draw suggestion.
-    */
-
-    if (rl->suggestion
-        && rl->suggestion_bytes)
-    {
-        rl_write_all(
-                rl->fd,
-                "\033[2m",
-                4);
-
-
-        rl_write_all(
-                rl->fd,
-                rl->suggestion,
-                rl->suggestion_bytes);
-
-
-        rl_write_all(
-                rl->fd,
-                "\033[22m",
-                5);
-    }
-
-
-
-    /*
-    ** Store render size.
-    */
-
-    rl_calc_render_size(
-            rl,
-            &rows,
-            &width);
-
-
-
-    rl->render.rows = rows;
-    rl->render.width = width;
-
-
-
-    /*
-    ** Store end position.
-    */
-
-    if (rows > 0)
-    {
-        rl->render.end_row =
-                rl->render.start_row + rows - 1;
-
-        rl->render.end_col =
-                width;
-    }
-
-
-
-    /*
-    ** Calculate logical cursor position.
-    */
-
-    rl_calc_position(
-            rl,
-            rl->cursor,
-            &cursor_row,
-            &cursor_col);
-
-
-
-    rl->render.cursor_row = cursor_row;
-    rl->render.cursor_col = cursor_col;
-
-
-
-    /*
-    ** Move terminal cursor.
-    */
-
-    rl_move_cursor(
-            rl,
-            rl->render.start_row + cursor_row,
-            (cursor_row == 0)
-                ? rl->render.start_col + cursor_col
-                : cursor_col);
-
-
-
-    /*
-    ** Save real terminal position.
-    */
-
-    rl->render.term_cursor_row =
-            rl->render.start_row + cursor_row;
-
-
-    rl->render.term_cursor_col =
-            (cursor_row == 0)
-                ? rl->render.start_col + cursor_col
-                : cursor_col;
+	rl->terminal.initialized = 1;
+	rl->dirty = 0;
 }

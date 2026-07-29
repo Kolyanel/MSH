@@ -9,134 +9,156 @@
 /*
 ** ============================================================
 ** Clear autosuggestion
-**
 ** ============================================================
 */
 
-void rl_clear_suggestion(
-        t_rl *rl)
+void	rl_clear_suggestion(
+		t_rl *rl)
 {
-    if (!rl)
-        return;
+	int	changed;
 
 
-    free(rl->suggestion);
+	if (!rl)
+		return;
 
-    rl->suggestion = NULL;
 
-    rl->suggestion_bytes = 0;
-    rl->suggestion_cols = 0;
+	changed = (rl->suggestion.text != NULL);
+
+
+	free(rl->suggestion.text);
+
+	rl->suggestion.text = NULL;
+
+	rl->suggestion.bytes = 0;
+
+	rl->suggestion.cols = 0;
+
+
+	if (changed)
+		rl->dirty = 1;
 }
 
 
 
 /*
 ** ============================================================
-** Search history suggestion
-**
-** Finds latest history entry starting with current line.
-**
+** Find suggestion from history
 ** ============================================================
 */
 
-void rl_suggest(
-        t_rl *rl)
+void	rl_suggest(
+		t_rl *rl)
 {
-    size_t i;
-    size_t index;
-    size_t start;
+	size_t			i;
+	size_t			index;
+	size_t			start;
+	size_t			len;
+	size_t			entry_len;
 
-    const char *line;
-
-
-    if (!rl)
-        return;
+	const char		*entry;
 
 
-    rl_clear_suggestion(rl);
+	if (!rl)
+		return;
 
 
-
-    if (!rl->hist)
-        return;
+	rl_clear_suggestion(rl);
 
 
-    if (rl->hist->size == 0)
-        return;
+	if (!rl->history.hist)
+		return;
 
 
-    if (!rl->line.data || rl->line.len == 0)
-        return;
+	if (rl->history.hist->size == 0)
+		return;
 
 
+	if (!rl->line.buffer.data
+		|| rl->line.buffer.len == 0)
+		return;
 
-    /*
-    ** History is circular buffer.
-    */
 
-    if (rl->hist->size < HIST_MAX)
-        start = 0;
-    else
-        start = rl->hist->head;
+	len = utf8_align_boundary(
+			rl->line.buffer.data,
+			rl->line.buffer.len);
 
 
 
-    i = rl->hist->size;
-
-
-    while (i > 0)
-    {
-        i--;
-
-
-        index = (start + i) % HIST_MAX;
-
-
-        line = rl->hist->lines[index];
-
-
-        if (!line)
-            continue;
+	if (rl->history.hist->size < HIST_MAX)
+		start = 0;
+	else
+		start = rl->history.hist->head;
 
 
 
-        if (strncmp(
-                line,
-                rl->line.data,
-                rl->line.len) != 0)
-        {
-            continue;
-        }
+	i = rl->history.hist->size;
+
+
+	while (i > 0)
+	{
+		i--;
+
+
+		index = (start + i) % HIST_MAX;
+
+
+		entry = rl->history.hist->lines[index];
+
+
+		if (!entry)
+			continue;
+
+
+		entry_len = strlen(entry);
+
+
+		if (entry_len <= len)
+			continue;
+
+
+		if (strncmp(
+				entry,
+				rl->line.buffer.data,
+				len) != 0)
+			continue;
 
 
 
-        if (strlen(line) <= rl->line.len)
-            continue;
+		rl->suggestion.text = malloc(
+				entry_len - len + 1);
+
+
+		if (!rl->suggestion.text)
+			return;
 
 
 
-        rl->suggestion = strdup(
-                line + rl->line.len);
-
-
-        if (!rl->suggestion)
-            return;
-
-
-
-        rl->suggestion_bytes =
-                strlen(rl->suggestion);
+		memcpy(
+			rl->suggestion.text,
+			entry + len,
+			entry_len - len);
 
 
 
-        rl->suggestion_cols =
-                utf8_display_width(
-                        rl->suggestion);
+		rl->suggestion.text[entry_len - len] = '\0';
 
 
 
-        return;
-    }
+		rl->suggestion.bytes =
+			entry_len - len;
+
+
+		rl->suggestion.cols =
+			utf8_width_n(
+				rl->suggestion.text,
+				rl->suggestion.bytes);
+
+
+		rl->dirty = 1;
+
+
+		return;
+	}
 }
 
 
@@ -144,46 +166,50 @@ void rl_suggest(
 /*
 ** ============================================================
 ** Accept autosuggestion
-**
-** Append suggestion to editable buffer.
-**
 ** ============================================================
 */
 
-void rl_accept_suggestion(
-        t_rl *rl)
+void	rl_accept_suggestion(
+		t_rl *rl)
 {
-    if (!rl)
-        return;
+	char	*text;
+	size_t	bytes;
 
 
-    if (!rl->suggestion)
-        return;
+	if (!rl)
+		return;
 
 
-    /*
-    ** Suggestion is only valid at end of line.
-    */
-
-    if (rl->cursor != rl->line.len)
-        return;
+	if (!rl->suggestion.text)
+		return;
 
 
-
-    if (buf_append_span(
-            &rl->line,
-            rl->suggestion,
-            rl->suggestion_bytes) < 0)
-    {
-        return;
-    }
+	if (rl->line.cursor != rl->line.buffer.len)
+		return;
 
 
-
-    rl->cursor =
-            rl->line.len;
-
+	text = rl->suggestion.text;
+	bytes = rl->suggestion.bytes;
 
 
-    rl_clear_suggestion(rl);
+	/*
+	** Detach before insert.
+	** insert() may clear suggestion.
+	*/
+
+	rl->suggestion.text = NULL;
+	rl->suggestion.bytes = 0;
+	rl->suggestion.cols = 0;
+
+
+	rl_insert(
+		rl,
+		text,
+		bytes);
+
+
+	free(text);
+
+
+	rl->dirty = 1;
 }

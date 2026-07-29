@@ -1,121 +1,73 @@
 #include "readline_internal.h"
 #include "utf8.h"
 
-
-
 /*
 ** ============================================================
-** Backspace
-**
-** Delete UTF-8 character before cursor.
-**
-** Cursor position is stored in bytes.
-**
+** Удалить символ слева от курсора
 ** ============================================================
 */
 
-void rl_backspace(
-        t_rl *rl)
+void	rl_backspace(
+	t_rl *rl)
 {
-    size_t prev;
+	const char	*start;
+	const char	*cursor;
+	const char	*prev;
+	size_t		start_pos;
 
+	if (!rl || rl->line.cursor == 0)
+		return;
 
-    if (!rl)
-        return;
+	start = rl->line.buffer.data;
+	cursor = start + rl->line.cursor;
 
+	prev = utf8_prev(
+		start,
+		cursor);
 
-    if (!rl->line.data)
-        return;
+	start_pos = (size_t)(prev - start);
 
-
-    if (rl->cursor == 0)
-        return;
-
-
-
-    prev =
-        utf8_prev(
-                rl->line.data,
-                rl->cursor);
-
-
-
-    if (buf_delete_range(
-            &rl->line,
-            prev,
-            rl->cursor - prev) < 0)
-    {
-        return;
-    }
-
-
-
-    rl->cursor = prev;
-
-
-
-    /*
-    ** Current suggestion became invalid.
-    */
-    rl_clear_suggestion(rl);
+	rl_delete_range(
+		rl,
+		start_pos,
+		rl->line.cursor);
 }
 
-
-
 /*
 ** ============================================================
-** Delete
-**
-** Delete UTF-8 character at cursor.
-**
-** Cursor does not move.
-**
+** Удалить символ справа от курсора
 ** ============================================================
 */
 
-void rl_delete(
-        t_rl *rl)
+void	rl_delete(
+	t_rl *rl)
 {
-    size_t next;
+	const char	*start;
+	const char	*cursor;
+	const char	*next;
+	size_t		end_pos;
 
+	if (!rl)
+		return;
 
-    if (!rl)
-        return;
+	if (rl->line.cursor >= rl->line.buffer.len)
+		return;
 
+	start = rl->line.buffer.data;
+	cursor = start + rl->line.cursor;
 
-    if (!rl->line.data)
-        return;
+	next = utf8_next(cursor);
 
+	if (next <= cursor)
+		return;
 
-    if (rl->cursor >= rl->line.len)
-        return;
+	if (next > start + rl->line.buffer.len)
+		next = start + rl->line.buffer.len;
 
+	end_pos = (size_t)(next - start);
 
-
-    next =
-        utf8_next(
-                rl->line.data,
-                rl->cursor);
-
-
-
-    if (next <= rl->cursor)
-        return;
-
-
-
-    if (buf_delete_range(
-            &rl->line,
-            rl->cursor,
-            next - rl->cursor) < 0)
-    {
-        return;
-    }
-
-
-
-    /*
-    ** Cursor stays at the same byte position.
-    */
-    rl_clear_suggestion(rl);
+	rl_delete_range(
+		rl,
+		rl->line.cursor,
+		end_pos);
 }

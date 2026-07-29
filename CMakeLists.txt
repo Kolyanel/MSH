@@ -39,6 +39,7 @@ add_library(mylib STATIC
     ${MYLIB_DIR}/src/my_string.c
     ${MYLIB_DIR}/src/utils.c
     ${MYLIB_DIR}/src/vector.c
+    ${MYLIB_DIR}/src/utf8.c
 )
 
 target_include_directories(mylib PUBLIC

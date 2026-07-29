@@ -3,3 +3,5 @@ build/
 *.a
 *.o
 *.tar.gz
+test_readline_logs/
+*.so
