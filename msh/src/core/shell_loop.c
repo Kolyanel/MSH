@@ -1,6 +1,8 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <unistd.h>
 
 #include "shell_loop.h"
 #include "io.h"
@@ -12,10 +14,9 @@
 #include "msh_signal.h"
 #include "exec_wait.h"
 #include "readline_internal.h"
-#include "utf8.h"
 
-int	shell_loop(
-		t_shell *sh)
+
+int	shell_loop(t_shell *sh)
 {
 	if (!sh)
 		return (MS_SET_ERR(EINVAL));
@@ -27,10 +28,9 @@ int	shell_loop(
 
 	while (!sh->should_exit)
 	{
-		Vector		tokens;
-		t_ast		ast;
-		char		*prompt;
-		size_t		prompt_cols;
+		Vector	tokens;
+		t_ast	ast;
+		char	*prompt;
 
 		memset(&tokens, 0, sizeof(Vector));
 		memset(&ast, 0, sizeof(t_ast));
@@ -71,7 +71,7 @@ int	shell_loop(
 		}
 
 		/*
-		** Построить prompt.
+		** Build prompt.
 		*/
 		prompt = sh_build_prompt(sh);
 
@@ -86,16 +86,10 @@ int	shell_loop(
 		}
 
 		/*
-		** Prompt содержит ANSI escape sequences.
+		** Print prompt.
 		**
-		** utf8_width_n() учитывает только визуальную ширину.
-		*/
-		prompt_cols = utf8_width_n(
-			prompt,
-			strlen(prompt));
-
-		/*
-		** Prompt принадлежит shell.
+		** После этого readline сам запросит у терминала
+		** реальную позицию курсора через DSR.
 		*/
 		if (puts_fd(
 				sh->tty_fd,
@@ -115,27 +109,14 @@ int	shell_loop(
 		free(prompt);
 
 		/*
-		** ========================================================
-		** readline
-		** ========================================================
-		**
-		** Prompt начинается в текущей позиции терминала.
-		**
-		** В нормальном интерактивном shell это начало строки:
-		**
-		**     row = 0
-		**     col = visual_width(prompt)
-		**
-		** Никакого DSR 6n больше нет.
+		** Readline owns the cursor from this point.
 		*/
 		errno = 0;
 
 		sh->cur_line = readline_fd(
 			sh->tty_fd,
 			NULL,
-			&sh->hist,
-			0,
-			prompt_cols);
+			&sh->hist);
 
 		/*
 		** Ctrl-C.
@@ -166,7 +147,7 @@ int	shell_loop(
 		}
 
 		/*
-		** Ошибка readline.
+		** Readline error.
 		*/
 		if (!sh->cur_line)
 		{
@@ -181,7 +162,21 @@ int	shell_loop(
 		errno = 0;
 
 		/*
-		** История.
+		** READLINE TEST MODE.
+		*/
+		if (getenv("MSH_READLINE_TEST"))
+		{
+			dprintf(
+				sh->tty_fd,
+				"READLINE_RESULT:%s\n",
+				sh->cur_line);
+
+			fsync(
+				sh->tty_fd);
+		}
+
+		/*
+		** History.
 		*/
 		hist_push(
 			&sh->hist,
@@ -203,7 +198,7 @@ int	shell_loop(
 		}
 
 		{
-			t_lex_status lex_res;
+			t_lex_status	lex_res;
 
 			lex_res = lex_line(
 				sh->cur_line,
@@ -276,7 +271,7 @@ int	shell_loop(
 				sh->should_exit = true;
 		}
 
-cleanup:
+	cleanup:
 		ast_free(&ast);
 
 		vec_free(

@@ -8,7 +8,7 @@
 ** ============================================================
 */
 
-static void	rl_event_char(
+static void rl_event_char(
 	t_rl *rl,
 	t_rl_event *ev)
 {
@@ -27,7 +27,7 @@ static void	rl_event_char(
 ** ============================================================
 */
 
-static void	rl_event_enter(
+static void rl_event_enter(
 	t_rl *rl)
 {
 	if (!rl)
@@ -46,7 +46,7 @@ static void	rl_event_enter(
 ** ============================================================
 */
 
-static void	rl_event_eof(
+static void rl_event_eof(
 	t_rl *rl)
 {
 	if (!rl)
@@ -73,7 +73,7 @@ static void	rl_event_eof(
 ** ============================================================
 */
 
-static void	rl_event_interrupt(
+static void rl_event_interrupt(
 	t_rl *rl)
 {
 	if (!rl)
@@ -95,7 +95,7 @@ static void	rl_event_interrupt(
 ** ============================================================
 */
 
-void	rl_process_event(
+void rl_process_event(
 	t_rl *rl,
 	t_rl_event *ev)
 {
@@ -104,60 +104,63 @@ void	rl_process_event(
 
 	switch (ev->key)
 	{
-		case RL_KEY_CHAR:
-			rl_event_char(rl, ev);
-			break;
+	case RL_KEY_CHAR:
+		rl_event_char(rl, ev);
+		break;
 
-		case RL_KEY_ENTER:
-			rl_event_enter(rl);
-			break;
+	case RL_KEY_ENTER:
+		rl_event_enter(rl);
+		break;
 
-		case RL_KEY_EOF:
-			rl_event_eof(rl);
-			break;
+	case RL_KEY_EOF:
+		rl_event_eof(rl);
+		break;
 
-		case RL_KEY_INTERRUPT:
-			rl_event_interrupt(rl);
-			break;
+	case RL_KEY_INTERRUPT:
+		rl_event_interrupt(rl);
+		break;
 
-		case RL_KEY_BACKSPACE:
-			rl_backspace(rl);
-			break;
+	case RL_KEY_BACKSPACE:
+	/*	dprintf(
+			2,
+			"EVENT BACKSPACE\n");*/
+		rl_backspace(rl);
+		break;
 
-		case RL_KEY_DELETE:
-			rl_delete(rl);
-			break;
+	case RL_KEY_DELETE:
+		rl_delete(rl);
+		break;
 
-		case RL_KEY_LEFT:
-			rl_cursor_left(rl);
-			break;
+	case RL_KEY_LEFT:
+		rl_cursor_left(rl);
+		break;
 
-		case RL_KEY_RIGHT:
-			rl_cursor_right(rl);
-			break;
+	case RL_KEY_RIGHT:
+		rl_cursor_right(rl);
+		break;
 
-		case RL_KEY_HOME:
-			rl_cursor_home(rl);
-			break;
+	case RL_KEY_HOME:
+		rl_cursor_home(rl);
+		break;
 
-		case RL_KEY_END:
-			rl_cursor_end(rl);
-			break;
+	case RL_KEY_END:
+		rl_cursor_end(rl);
+		break;
 
-		case RL_KEY_UP:
-			rl_history_up(rl);
-			break;
+	case RL_KEY_UP:
+		rl_history_up(rl);
+		break;
 
-		case RL_KEY_DOWN:
-			rl_history_down(rl);
-			break;
+	case RL_KEY_DOWN:
+		rl_history_down(rl);
+		break;
 
-		case RL_KEY_TAB:
-			rl_complete(rl);
-			break;
+	case RL_KEY_TAB:
+		rl_complete(rl);
+		break;
 
-		case RL_KEY_NONE:
-		default:
-			break;
+	case RL_KEY_NONE:
+	default:
+		break;
 	}
 }

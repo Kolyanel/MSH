@@ -18,6 +18,12 @@ void	rl_backspace(
 	if (!rl || rl->line.cursor == 0)
 		return;
 
+	/*dprintf(
+    2,
+    "BACKSPACE: cursor=%zu len=%zu\n",
+    rl->line.cursor,
+    rl->line.buffer.len);*/
+
 	start = rl->line.buffer.data;
 	cursor = start + rl->line.cursor;
 

@@ -1,3 +1,6 @@
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "readline_internal.h"
 #include "utf8.h"
 
@@ -7,169 +10,168 @@
 ** ============================================================
 */
 
-static size_t	rl_term_cols(
-				t_rl *rl)
+static size_t	rl_term_cols(t_rl *rl)
 {
 	if (!rl || rl->terminal.cols == 0)
 		return (RL_DEFAULT_TERM_COLS);
+
 	return (rl->terminal.cols);
 }
 
 /*
 ** ============================================================
-** First-line available columns
+** Advance terminal-relative position
 ** ============================================================
 **
-** The prompt already occupies origin_col terminal columns.
+** Координаты row/col здесь являются RELATIVE координатами
+** readline.
 **
-** Therefore the first physical readline row has fewer
-** available columns than subsequent rows.
+** Но первый физический ряд начинается не обязательно с
+** terminal column 0.
 **
-** Example:
+** Например:
 **
-**     terminal width = 80
-**     prompt width   = 20
+**     terminal.cols = 29
+**     origin_col    = 20
 **
-**     first readline row = 60 columns
-**     next rows          = 80 columns
+** тогда:
 **
-** ============================================================
-*/
-
-static size_t	rl_first_line_cols(
-				t_rl *rl)
-{
-	size_t	cols;
-
-	cols = rl_term_cols(rl);
-
-	if (rl->terminal.origin_col >= cols)
-		return (1);
-
-	return (cols - rl->terminal.origin_col);
-}
-
-/*
-** ============================================================
-** Advance visual position
-** ============================================================
+**     relative (0,0) -> absolute column 20
+**     relative (0,1) -> absolute column 21
+**     ...
+**     relative (0,8) -> absolute column 28
+**     relative (1,0) -> absolute column 0
 **
-** row / col are RELATIVE to readline origin.
+** Поэтому первый ряд имеет только:
 **
-** On row zero, col is measured inside the available area
-** after the prompt.
+**     cols - origin_col
 **
-** On subsequent rows, col is measured from physical column 0.
+** доступных колонок.
 **
-** width is the visual width of one UTF-8 character.
+** После первого переноса все последующие ряды имеют полную
+** ширину terminal.cols.
 **
+** ВАЖНО:
+**
+** Эта функция НЕ превращает relative col в absolute col.
+** Она только учитывает origin_col при определении места
+** переноса.
 ** ============================================================
 */
 
 static void	rl_advance(
-				size_t *row,
-				size_t *col,
-				size_t width,
-				size_t first_cols,
-				size_t cols)
+		size_t *row,
+		size_t *col,
+		size_t width,
+		size_t cols,
+		size_t origin_col)
 {
-	size_t	available;
+	size_t	first_cols;
 
 	if (!row || !col || width == 0 || cols == 0)
 		return;
 
 	/*
-	** First physical readline row starts after the prompt.
+	** Безопасность: origin_col должен находиться внутри
+	** текущей строки терминала.
+	**
+	** Нормальная ситуация:
+	**
+	**     origin_col < cols
+	**
+	** Если по какой-либо причине это не так, начинаем
+	** с полной строки.
+	*/
+	if (origin_col >= cols)
+		origin_col = 0;
+
+	/*
+	** Сколько колонок доступно в первом физическом ряду.
+	*/
+	first_cols = cols - origin_col;
+
+	/*
+	** ========================================================
+	** Первый readline-relative ряд
+	** ========================================================
 	*/
 	if (*row == 0)
-		available = first_cols;
+	{
+		/*
+		** Широкий символ не помещается в оставшееся место
+		** первого ряда.
+		*/
+		if (width > first_cols - *col)
+		{
+			(*row)++;
+			*col = 0;
+		}
+	}
 	else
-		available = cols;
-
-	/*
-	** Defensive normalization.
-	*/
-	if (*col > available)
 	{
-		(*row)++;
-		*col = 0;
-		available = cols;
-	}
-
-	/*
-	** Character does not fit on the current row.
-	**
-	** Do not split a UTF-8 character across terminal rows.
-	*/
-	if (width > available - *col)
-	{
-		(*row)++;
-		*col = 0;
-		available = cols;
-	}
-
-	/*
-	** A character wider than the complete terminal width cannot
-	** be represented without occupying the whole row.
-	**
-	** In normal UTF-8 terminal text this is not expected, but
-	** keeping the position bounded makes the layout robust.
-	*/
-	if (width >= available && *col == 0)
-	{
-		*col = width;
-		if (*col >= cols)
-			*col = cols;
-		return;
+		/*
+		** Последующие ряды имеют полную ширину терминала.
+		*/
+		if (width > cols - *col)
+		{
+			(*row)++;
+			*col = 0;
+		}
 	}
 
 	*col += width;
 
 	/*
-	** Reaching the right edge means the next character starts
-	** on the following physical row.
+	** Если символ занял последнюю доступную позицию,
+	** readline-модель сразу переводится на следующий
+	** физический ряд.
 	**
-	** We keep col == available here. The next call to
-	** rl_advance() performs the actual wrap.
+	** Это соответствует rl_render.c.
 	*/
+	if (*row == 0)
+	{
+		if (*col >= first_cols)
+		{
+			(*row)++;
+			*col = 0;
+		}
+	}
+	else
+	{
+		if (*col >= cols)
+		{
+			(*row)++;
+			*col = 0;
+		}
+	}
 }
 
 /*
 ** ============================================================
-** Text position
+** Calculate text position
 ** ============================================================
 **
-** Coordinates are RELATIVE to readline origin.
+** Считает позицию текста относительно начала readline.
 **
-** row:
+** ВАЖНО:
 **
-**     0 = first physical row containing the editable input.
+** row/col НЕ являются абсолютными координатами терминала.
 **
-** col:
-**
-**     On row 0:
-**         column relative to the position immediately after
-**         the prompt.
-**
-**     On row > 0:
-**         physical terminal column.
-**
-** The prompt is NOT included in the returned coordinates.
-**
+** origin_col используется только для определения того,
+** сколько места осталось в первом физическом ряду.
 ** ============================================================
 */
 
 static void	rl_text_position(
-				const char *s,
-				size_t bytes,
-				size_t *row,
-				size_t *col,
-				size_t first_cols,
-				size_t cols)
+		const char *s,
+		size_t bytes,
+		size_t *row,
+		size_t *col,
+		size_t cols,
+		size_t origin_col)
 {
 	size_t	pos;
-	size_t	ansi_len;
-	size_t	char_len;
+	size_t	len;
 	size_t	width;
 
 	if (!s || !row || !col || cols == 0)
@@ -179,26 +181,25 @@ static void	rl_text_position(
 
 	while (pos < bytes)
 	{
+		/*
+		** ANSI escape sequence.
+		**
+		** Она не занимает экранных колонок.
+		*/
 		if ((unsigned char)s[pos] == 0x1B)
 		{
-			ansi_len = utf8_ansi_len(s + pos);
+			len = utf8_ansi_len(s + pos);
 
-			if (ansi_len == 0)
-			{
-				pos++;
-				continue;
-			}
+			if (len == 0 || len > bytes - pos)
+				len = 1;
 
-			if (ansi_len > bytes - pos)
-			{
-				pos++;
-				continue;
-			}
-
-			pos += ansi_len;
+			pos += len;
 			continue;
 		}
 
+		/*
+		** Newline.
+		*/
 		if (s[pos] == '\n')
 		{
 			(*row)++;
@@ -207,6 +208,9 @@ static void	rl_text_position(
 			continue;
 		}
 
+		/*
+		** Carriage return.
+		*/
 		if (s[pos] == '\r')
 		{
 			*col = 0;
@@ -214,11 +218,14 @@ static void	rl_text_position(
 			continue;
 		}
 
-		char_len = utf8_char_len(s + pos);
+		/*
+		** UTF-8 character.
+		*/
+		len = utf8_char_len(s + pos);
 
-		if (char_len == 0 || char_len > bytes - pos)
+		if (len == 0 || len > bytes - pos)
 		{
-			char_len = 1;
+			len = 1;
 			width = 1;
 		}
 		else
@@ -233,45 +240,44 @@ static void	rl_text_position(
 			row,
 			col,
 			width,
-			first_cols,
-			cols);
+			cols,
+			origin_col);
 
-		pos += char_len;
+		pos += len;
 	}
 }
 
 /*
 ** ============================================================
-** Calculate cursor position
+** Calculate cursor position from byte position
 ** ============================================================
 **
-** byte_pos is a UTF-8 byte offset.
+** Возвращает readline-relative координаты курсора.
 **
-** Result is RELATIVE to readline origin.
+** Например при:
 **
-** Therefore:
+**     terminal.cols = 29
+**     origin_col    = 20
 **
-**     empty input:
-**         row = 0
-**         col = 0
+** и строке из 9 ASCII символов:
 **
-**     first character:
-**         starts immediately after prompt
+**     cursor = (1,0)
 **
-** The prompt width is used only to calculate how many columns
-** remain on the first physical row.
+** а не:
+**
+**     cursor = (0,9)
 **
 ** ============================================================
 */
 
 void	rl_calc_position(
-				t_rl *rl,
-				size_t byte_pos,
-				size_t *row,
-				size_t *col)
+		t_rl *rl,
+		size_t byte_pos,
+		size_t *row,
+		size_t *col)
 {
 	size_t	cols;
-	size_t	first_cols;
+	size_t	origin_col;
 
 	if (!rl || !row || !col)
 		return;
@@ -282,20 +288,21 @@ void	rl_calc_position(
 	if (rl->line.buffer.data)
 	{
 		byte_pos = utf8_align_boundary(
-				rl->line.buffer.data,
-				byte_pos);
+			rl->line.buffer.data,
+			byte_pos);
 	}
 
 	cols = rl_term_cols(rl);
-	first_cols = rl_first_line_cols(rl);
 
-	/*
-	** Coordinates are relative to readline origin.
-	*/
+	origin_col = rl->terminal.origin_col;
+
+	if (origin_col >= cols)
+		origin_col = 0;
+
 	*row = 0;
 	*col = 0;
 
-	if (!rl->line.buffer.data || byte_pos == 0)
+	if (byte_pos == 0)
 		return;
 
 	rl_text_position(
@@ -303,8 +310,8 @@ void	rl_calc_position(
 		byte_pos,
 		row,
 		col,
-		first_cols,
-		cols);
+		cols,
+		origin_col);
 }
 
 /*
@@ -312,66 +319,135 @@ void	rl_calc_position(
 ** Calculate complete layout
 ** ============================================================
 **
-** All layout coordinates are RELATIVE to readline origin.
+** Layout рассчитывает:
 **
-** The prompt is represented only by origin_col when calculating
-** the available width of the first physical row.
+**     1. конец всей отрисованной области;
+**     2. позицию editable cursor;
+**     3. количество физических строк.
 **
+** Все координаты layout остаются RELATIVE.
+**
+** Абсолютное положение получает только terminal.c через
+** rl_abs_position().
 ** ============================================================
 */
 
-void	rl_calc_layout(
-				t_rl *rl)
+void	rl_calc_layout(t_rl *rl)
 {
 	size_t	row;
 	size_t	col;
 	size_t	cols;
-	size_t	first_cols;
+	size_t	origin_col;
 
 	if (!rl)
 		return;
 
 	cols = rl_term_cols(rl);
-	first_cols = rl_first_line_cols(rl);
 
-	/*
-	** Empty input begins at readline-relative (0, 0).
-	*/
+	origin_col = rl->terminal.origin_col;
+
+	if (origin_col >= cols)
+		origin_col = 0;
+
 	row = 0;
 	col = 0;
 
-	if (rl->line.buffer.data
-		&& rl->line.buffer.len != 0)
+	/*
+	** ========================================================
+	** Editable line
+	** ========================================================
+	*/
+
+	if (rl->line.buffer.data && rl->line.buffer.len != 0)
 	{
 		rl_text_position(
 			rl->line.buffer.data,
 			rl->line.buffer.len,
 			&row,
 			&col,
-			first_cols,
-			cols);
+			cols,
+			origin_col);
+	}
+
+	/*
+	** ========================================================
+	** Suggestion follows editable line
+	** ========================================================
+	*/
+
+	if (rl->suggestion.text && rl->suggestion.bytes != 0)
+	{
+		/*
+		** Здесь origin_col уже должен использоваться только
+		** для первого физического ряда всей render-area.
+		**
+		** Если editable line уже перешла на row > 0,
+		** origin_col больше не влияет.
+		*/
+		rl_text_position(
+			rl->suggestion.text,
+			rl->suggestion.bytes,
+			&row,
+			&col,
+			cols,
+			origin_col);
 	}
 
 	rl->layout.end_row = row;
 	rl->layout.end_col = col;
 
+	/*
+	** Даже если конечная позиция:
+	**
+	**     row=1 col=0
+	**
+	** это уже вторая физическая строка.
+	*/
 	rl->layout.rows = row + 1;
 
 	if (rl->layout.rows == 0)
 		rl->layout.rows = 1;
 
-	rl->layout.line_cols =
-		utf8_width_n(
-			rl->line.buffer.data,
-			rl->line.buffer.len);
+	/*
+	** ========================================================
+	** Display width of editable line
+	** ========================================================
+	*/
+
+	rl->layout.line_cols = utf8_width_n(
+		rl->line.buffer.data,
+		rl->line.buffer.len);
 
 	rl->layout.suggestion_cols =
 		rl->suggestion.cols;
 
 	/*
-	** Cursor position is calculated using the exact same
-	** coordinate model as the rendered line.
+	** ========================================================
+	** Debug
+	** ========================================================
 	*/
+
+	if (getenv("MSH_CURSOR_DEBUG"))
+	{
+		fprintf(
+			stderr,
+			"LAYOUT_DEBUG: "
+			"buffer_len=%zu "
+			"line_cursor=%zu "
+			"origin_col=%zu "
+			"cols=%zu\n",
+			rl->line.buffer.len,
+			rl->line.cursor,
+			origin_col,
+			cols);
+	}
+
+	/*
+	** ========================================================
+	** Cursor is calculated from editable buffer only.
+	** ========================================================
+	*/
+
 	rl_calc_position(
 		rl,
 		rl->line.cursor,
@@ -381,58 +457,16 @@ void	rl_calc_layout(
 
 /*
 ** ============================================================
-** Calculate rendered rows
-** ============================================================
-**
-** Calculates the physical rows occupied by:
-**
-**     line + suggestion
-**
-** Coordinates remain relative to readline origin.
-**
+** Calculate number of rendered rows
 ** ============================================================
 */
 
-size_t	rl_calc_rows(
-				t_rl *rl)
+size_t	rl_calc_rows(t_rl *rl)
 {
-	size_t	row;
-	size_t	col;
-	size_t	cols;
-	size_t	first_cols;
-
 	if (!rl)
 		return (1);
 
-	cols = rl_term_cols(rl);
-	first_cols = rl_first_line_cols(rl);
+	rl_calc_layout(rl);
 
-	row = 0;
-	col = 0;
-
-	if (rl->line.buffer.data
-		&& rl->line.buffer.len != 0)
-	{
-		rl_text_position(
-			rl->line.buffer.data,
-			rl->line.buffer.len,
-			&row,
-			&col,
-			first_cols,
-			cols);
-	}
-
-	if (rl->suggestion.text
-		&& rl->suggestion.bytes != 0)
-	{
-		rl_text_position(
-			rl->suggestion.text,
-			rl->suggestion.bytes,
-			&row,
-			&col,
-			first_cols,
-			cols);
-	}
-
-	return (row + 1);
+	return (rl->layout.rows);
 }
